@@ -1,0 +1,6 @@
+langchain
+langchain[openai]
+deepagents
+python-dotenv
+uuid
+requests
