@@ -1,8 +1,11 @@
 from utils.model import model
 from utils.tools import curl
-from deepagents import create_deep_agent
+from langchain.agents import create_agent
 from langgraph.checkpoint.memory import MemorySaver
 from deepagents.backends.filesystem import FilesystemBackend
+from langchain.agents.middleware import TodoListMiddleware
+from deepagents.middleware import SkillsMiddleware, FilesystemMiddleware
+
 import uuid
 import os
 
@@ -15,19 +18,19 @@ root_dir = root_dir.replace("\\", "/")
 backend = FilesystemBackend(root_dir=root_dir)
 skills = [f"{root_dir}/skills/"]
 
+
+my__middleware = [
+    TodoListMiddleware(),
+    SkillsMiddleware(backend=backend, sources=skills),
+    FilesystemMiddleware(backend=backend),
+]
+
 # agent with our custom model and skill middleware
-agent = create_deep_agent(
+agent = create_agent(
     model = model,
-    backend=backend,
     tools=[curl],
-    skills=skills,
-    subagents=[], # turning subagents off so that it doesn't interfere with skill usageS
-    interrupt_on={
-        "write_file": True,  # Default: approve, edit, reject
-        "read_file": False,  # No interrupts needed
-        "edit_file": True    # Default: approve, edit, reject
-    },
     checkpointer=checkpointer,
+    middleware=my__middleware,
     system_prompt=(
         "**CRITICAL INSTRUCTION - SKILL USAGE PROTOCOL:**\n\n"
         "BEFORE responding to ANY user request, you MUST:\n"
