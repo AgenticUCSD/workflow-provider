@@ -26,5 +26,38 @@
 	"metadata": {
 		"source": "mock_prompt",
 		"priority": "high"
-	}
+	},
+	"rejected_workflows": [
+		{
+			"workflow_id": "wf_schedule_meeting_001_rej",
+			"name": "Send single time suggestion",
+			"description": "Pick one time and ask everyone to accept.",
+			"steps": [
+				"Pick a time slot next week.",
+				"Email participants with the chosen time.",
+				"Create the calendar invite if everyone agrees."
+			]
+		},
+		{
+			"workflow_id": "wf_schedule_meeting_002_rej",
+			"name": "Schedule without availability",
+			"description": "Create an event without checking calendars.",
+			"steps": [
+				"Create a 30-minute meeting invite.",
+				"Send the invite to all participants."
+			]
+		}
+	],
+	"proposed_workflow": {
+		"workflow_id": "wf_schedule_meeting_003_proposed",
+		"name": "Find mutually available slots",
+		"description": "Check calendars within the time window and schedule a 30-minute meeting.",
+		"steps": [
+			"Check participant availability for Tue-Thu, 10:00-16:00 local time next week.",
+			"Identify three 30-minute slots that work for all participants.",
+			"Confirm the top slot with participants by email.",
+			"Create a video conference event and send invites."
+		]
+	},
+	"feedback": "Include the timezone explicitly in the confirmation message and avoid proposing times on holidays if they fall in the window."
 }

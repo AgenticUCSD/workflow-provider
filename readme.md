@@ -1,15 +1,16 @@
 # Workflow Planner
 
 ## Architecture
-FastAPI + Uvicorn webserver that just queries the Langchain agent on every call to its endpoint
+FastAPI + Uvicorn webserver that calls a Langchain agent on each request.
 
-- Input `Task (Objective, TaskTypes, Status)` is sent to `POST /task_to_workflow`.
-- The agent returns a structured `Workflow (id, name, description, steps)` due to it being initialized with `response_format=ToolStrategy(Workflow)`
+- `POST /create_workflow` accepts a `task` payload plus optional `rejected_workflows` and returns a structured `Workflow`.
+- `POST /edit_workflow` accepts a `task`, `proposed_workflow`, and `feedback`, then returns an updated `Workflow`.
+- The agent uses `response_format=ToolStrategy(Workflow)` to enforce structured output.
 
-No storage/memory in the server, and the skills and custom middleware has beeen removed as well so that this agent can function as clean and minimal as possible.
+No storage/memory in the server; the service is designed to be minimal and stateless.
 
 ## Setup
-Conda environment for clean local dev environments
+Conda environment for clean local dev environments.
 
 ```
 conda create -n "agents_ucsd" python==3.11
@@ -18,6 +19,13 @@ pip install -r requirements.txt
 uvicorn app:app --reload
 python ./utils/tester.py
 ```
+
+### Testing
+The tester reads mock prompts from `./prompts` and calls the API for both initial
+workflow creation and optional feedback edits.
+
+- Set `WORKFLOW_API_URL` to point at a running server (defaults to `http://127.0.0.1:8000`).
+- Each prompt can include `rejected_workflows`, `proposed_workflow`, and `feedback` to exercise both endpoints.
 
 
 

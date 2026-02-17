@@ -1,3 +1,4 @@
+from typing import List
 from utils.model import model
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
@@ -11,20 +12,20 @@ agent = create_agent(
     model=model,
     response_format=ToolStrategy(Workflow),
     system_prompt=(
-        "You are a workflow planner. You take in a task object and produce a workflow for it. "
+        "You are a workflow planner. You take in a task object with additional context and then produce a workflow for it. "
         "Return only a workflow object that conforms to the required schema.\n\n"
         "The workflow should be broken down into steps that are as atomic as possible. "
         "Each step should be a task that can be completed in one turn (tool call, llm call, etc)."
     ),
 )
 
-def run_agent(task: Task):
+def create_workflow_initial(task: Task, rejected_workflows: List[Workflow] = None):
 
     # Generate a unique thread ID for this task
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
     
-    content = f"Task: {task.model_dump()}\n\nGenerate a workflow for this task."
+    content = f"Generate a workflow for this task given the workflows the user rejected. Task: {task.model_dump()}\n\n. Rejected workflows: { [w.model_dump() for w in rejected_workflows] if rejected_workflows else 'None'}"
 
     chat = [
         {
@@ -34,8 +35,31 @@ def run_agent(task: Task):
     ]
 
     result = agent.invoke({"messages": chat}, config=config)
-    return result
+    return extract_workflow(result)
 
+
+def edit_proposed_workflow(task: Task, proposed_workflow: Workflow, feedback: str):
+    config_payload = getattr(proposed_workflow, "config", None)
+    if isinstance(config_payload, dict):
+        thread_id = config_payload.get("thread_id")
+    else:
+        thread_id = getattr(config_payload, "thread_id", None)
+
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+
+    content = f"Here is the workflow you proposed for the task. Task: {task.model_dump()}\n\n Proposed workflow: {proposed_workflow.model_dump()}\n\nThe user provided the following feedback on how to improve the workflow: {feedback}\n\nEdit the workflow to address the user's feedback. Only return the updated workflow, do not include any explanations."
+
+    chat = [
+        {
+            "role": "user",
+            "content": content,
+        }
+    ]
+
+    result = agent.invoke({"messages": chat}, config=config)
+    return extract_workflow(result)
 
 def extract_workflow(result) -> Workflow:
     if isinstance(result, Workflow):
@@ -87,10 +111,6 @@ def extract_workflow(result) -> Workflow:
 
     raise ValueError("Could not parse workflow from agent result")
 
-
-def task_to_workflow(task: Task) -> Workflow:
-    result = run_agent(task)
-    return extract_workflow(result)
 
 
 def process_result(result):

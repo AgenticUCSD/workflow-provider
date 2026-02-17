@@ -24,5 +24,40 @@
 	"metadata": {
 		"source": "mock_prompt",
 		"priority": "low"
-	}
+	},
+	"rejected_workflows": [
+		{
+			"workflow_id": "wf_check_report_001_rej",
+			"name": "Quick scan weekly report",
+			"description": "Skim the report and reply with a yes/no on completeness.",
+			"steps": [
+				"Open the shared drive folder for Weekly Reports.",
+				"Skim the latest Weekly Report for required sections.",
+				"Reply with whether sections are missing."
+			]
+		},
+		{
+			"workflow_id": "wf_check_report_002_rej",
+			"name": "Summarize report content",
+			"description": "Summarize the report instead of validating required sections.",
+			"steps": [
+				"Locate the latest Weekly Report.",
+				"Write a brief summary of the report.",
+				"Send the summary to the requester."
+			]
+		}
+	],
+	"proposed_workflow": {
+		"workflow_id": "wf_check_report_003_proposed",
+		"name": "Validate weekly report sections",
+		"description": "Verify the report exists and list any missing required sections.",
+		"steps": [
+			"Open Shared Drive / Reports / Weekly.",
+			"Find the latest Weekly Report file by date.",
+			"Check for Summary, Metrics, Risks, and Next Steps sections.",
+			"Record any missing sections in a checklist.",
+			"Respond with report found status and missing sections."
+		]
+	},
+	"feedback": "Add a step to handle the case where the report is missing and note that access is read-only before attempting edits."
 }

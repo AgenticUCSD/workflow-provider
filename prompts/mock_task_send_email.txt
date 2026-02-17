@@ -26,5 +26,38 @@
 	"metadata": {
 		"source": "mock_prompt",
 		"priority": "medium"
-	}
+	},
+	"rejected_workflows": [
+		{
+			"workflow_id": "wf_send_email_001_rej",
+			"name": "Draft long status email",
+			"description": "Write a detailed email without word limit concerns.",
+			"steps": [
+				"Draft a detailed status update with background context.",
+				"List blockers and risks in paragraph form.",
+				"Send the email to the team."
+			]
+		},
+		{
+			"workflow_id": "wf_send_email_002_rej",
+			"name": "Send update without blockers",
+			"description": "Send a progress-only update.",
+			"steps": [
+				"Write a brief progress summary.",
+				"Send the email to recipients."
+			]
+		}
+	],
+	"proposed_workflow": {
+		"workflow_id": "wf_send_email_003_proposed",
+		"name": "Compose concise status email",
+		"description": "Write a concise status update including progress and blockers under 120 words.",
+		"steps": [
+			"Draft a concise email with subject and greeting.",
+			"Include progress summary and current blockers.",
+			"Check the draft is under 120 words and concise.",
+			"Send the email to the project team."
+		]
+	},
+	"feedback": "Keep it under 80 words, and add a line asking for an ETA on staging access if available."
 }
