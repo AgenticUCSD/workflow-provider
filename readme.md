@@ -7,7 +7,7 @@ FastAPI + Uvicorn webserver that calls a Langchain agent on each request.
 - `POST /edit_workflow` accepts a `task`, `proposed_workflow`, and `feedback`, then returns an updated `Workflow`.
 - The agent uses `response_format=ToolStrategy(Workflow)` to enforce structured output.
 
-No storage/memory in the server; the service is designed to be minimal and stateless.
+No storage/memory in the server, and the skills and custom middleware has beeen removed as well so that this agent can be as clean and minimal as possible.
 
 ## Setup
 Conda environment for clean local dev environments.
