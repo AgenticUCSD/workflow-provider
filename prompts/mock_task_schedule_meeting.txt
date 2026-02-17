@@ -1,0 +1,30 @@
+{
+	"task_id": "task_schedule_meeting_001",
+	"task_type": "schedule",
+	"objective": {
+		"objective_id": "obj_schedule_meeting_001",
+		"name": "Schedule roadmap review",
+		"description": "Set a 30-minute meeting to review the Q1 roadmap.",
+		"inputs": {
+			"participants": ["alex@example.com", "priya@example.com"],
+			"duration_minutes": 30,
+			"time_window": "Next week, Tue-Thu, 10:00-16:00 local time",
+			"location": "Video conference"
+		},
+		"constraints": {
+			"timezone": "America/Los_Angeles",
+			"avoid_days": ["Monday", "Friday"]
+		},
+		"success_criteria": "Meeting scheduled on a mutually available time slot and invites sent.",
+		"expected_output": {
+			"meeting_scheduled": true,
+			"calendar_event_id": "<generated-id>"
+		},
+		"deadline": "2026-02-20T23:59:00Z"
+	},
+	"status": "pending",
+	"metadata": {
+		"source": "mock_prompt",
+		"priority": "high"
+	}
+}

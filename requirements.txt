@@ -4,3 +4,5 @@ deepagents
 python-dotenv
 uuid
 requests
+fastapi
+uvicorn

@@ -1,0 +1,30 @@
+{
+	"task_id": "task_send_email_001",
+	"task_type": "action_required",
+	"objective": {
+		"objective_id": "obj_send_email_001",
+		"name": "Send status email",
+		"description": "Email the project team with today's progress and blockers.",
+		"inputs": {
+			"recipients": ["team@example.com"],
+			"subject": "Daily status update",
+			"progress_summary": "Completed API integration and updated unit tests.",
+			"blockers": "Waiting on access to staging environment."
+		},
+		"constraints": {
+			"tone": "concise",
+			"max_length_words": 120
+		},
+		"success_criteria": "Email sent to all recipients with progress and blockers included.",
+		"expected_output": {
+			"email_sent": true,
+			"message_id": "<generated-id>"
+		},
+		"deadline": "2026-02-16T17:00:00Z"
+	},
+	"status": "pending",
+	"metadata": {
+		"source": "mock_prompt",
+		"priority": "medium"
+	}
+}

@@ -1,0 +1,28 @@
+{
+	"task_id": "task_check_report_001",
+	"task_type": "review_feedback",
+	"objective": {
+		"objective_id": "obj_check_report_001",
+		"name": "Verify weekly report",
+		"description": "Confirm the weekly report is submitted and identify missing sections.",
+		"inputs": {
+			"report_name": "Weekly Report",
+			"storage_location": "Shared Drive / Reports / Weekly",
+			"required_sections": ["Summary", "Metrics", "Risks", "Next Steps"]
+		},
+		"constraints": {
+			"access_level": "read_only"
+		},
+		"success_criteria": "Report found and missing sections (if any) documented.",
+		"expected_output": {
+			"report_found": true,
+			"missing_sections": []
+		},
+		"deadline": "2026-02-16T18:00:00Z"
+	},
+	"status": "pending",
+	"metadata": {
+		"source": "mock_prompt",
+		"priority": "low"
+	}
+}

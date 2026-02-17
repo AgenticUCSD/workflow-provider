@@ -1,2 +1,8 @@
 .env
 /utils/__pycache__/
+__pycache__/
+
+# discarding files from a diff project
+credentials.json
+email_script.py
+token.json
