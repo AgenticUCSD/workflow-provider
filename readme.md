@@ -1,13 +1,20 @@
-# Workflow Planner
+# Workflow Provider
 
 ## Architecture
-FastAPI + Uvicorn webserver that calls a Langchain agent on each request.
+FastAPI + Uvicorn webserver with a dual-agent system (BuilderAgent and SearchAgent) backed by ChromaDB vector storage for RAG-based workflow retrieval.
 
-- `POST /create_workflow` accepts a `task` payload plus optional `rejected_workflows` and returns a structured `Workflow`.
-- `POST /edit_workflow` accepts a `task`, `proposed_workflow`, and `feedback`, then returns an updated `Workflow`.
-- The agent uses `response_format=ToolStrategy(Workflow)` to enforce structured output.
+### Components
+- **BuilderAgent**: Creates and edits workflows using structured LLM output via `ToolStrategy(Workflow)`
+- **SearchAgent**: Retrieves relevant workflows from vector store using semantic similarity
+- **ChromaVectorStore**: Manages two ChromaDB collections (manual_workflows, generated_workflows) with OpenAI embeddings
 
-No storage/memory in the server, and the skills and custom middleware has beeen removed as well so that this agent can be as clean and minimal as possible.
+
+### API Endpoints
+- `POST /create_workflow` accepts a `CreateWorkflowRequest` (task, optional rejected_workflows) and returns a structured `Workflow`
+- `POST /edit_workflow` accepts an `EditWorkflowRequest` (task, proposed_workflow, feedback) and returns an updated `Workflow`
+- `POST /search_workflows` accepts a `Task` and returns relevant workflows from the vector database using RAG
+- `GET /health` for health checks
+
 
 ## Setup
 Conda environment for clean local dev environments.
@@ -21,11 +28,16 @@ python ./utils/tester.py
 ```
 
 ### Testing
-The tester reads mock prompts from `./prompts` and calls the API for both initial
-workflow creation and optional feedback edits.
+The tester (`utils/tester.py`) initializes the vector database and tests all three API endpoints:
 
-- Set `WORKFLOW_API_URL` to point at a running server (defaults to `http://127.0.0.1:8000`).
-- Each prompt can include `rejected_workflows`, `proposed_workflow`, and `feedback` to exercise both endpoints.
+1. **Vector DB Initialization**: Loads workflows from `prompts/random_workflows.json` into ChromaDB (manual_workflows collection) on first run
+2. **Workflow Search**: Tests `/search_workflows` to retrieve semantically similar workflows for each task
+3. **Workflow Creation**: Tests `/create_workflow` with task and optional rejected workflows
+4. **Workflow Editing**: Tests `/edit_workflow` if `proposed_workflow` and `feedback` are provided in the mock task file
+
+**Configuration:**
+- Set `WORKFLOW_API_URL` environment variable to point at a running server (defaults to `http://127.0.0.1:8000`)
+- Mock tasks in `./prompts/*.txt` are JSON files that can include `rejected_workflows`, `proposed_workflow`, and `feedback` fields
 
 
 

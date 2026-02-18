@@ -1,10 +1,8 @@
-from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+from utils.config import OPENAI_API_KEY
 
-# environment variables populated from .env file
-# api_key, endpoint, etcs
-load_dotenv()
 
 model = ChatOpenAI(
     model="gpt-4.1",
+    api_key=OPENAI_API_KEY,
 )

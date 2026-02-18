@@ -6,3 +6,4 @@ uuid
 requests
 fastapi
 uvicorn
+chromadb
