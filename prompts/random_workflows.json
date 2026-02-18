@@ -1,0 +1,140 @@
+[
+  {
+    "workflow_id": "wf_random_001",
+    "name": "Organize team standup",
+    "description": "Schedule and conduct a daily team standup meeting to sync on progress.",
+    "steps": [
+      "Check calendar for team availability",
+      "Send invite for 15-minute standup meeting",
+      "Prepare agenda with focus areas",
+      "Conduct meeting and capture action items",
+      "Send meeting notes to team"
+    ]
+  },
+  {
+    "workflow_id": "wf_random_002",
+    "name": "Create project documentation",
+    "description": "Write comprehensive documentation for the new project module.",
+    "steps": [
+      "Review module specifications and requirements",
+      "Outline documentation structure",
+      "Draft API documentation with examples",
+      "Add troubleshooting section",
+      "Get peer review and iterate",
+      "Publish documentation to wiki"
+    ]
+  },
+  {
+    "workflow_id": "wf_random_003",
+    "name": "Fix critical bug in production",
+    "description": "Rapidly identify and resolve a critical production issue.",
+    "steps": [
+      "Check error logs and monitoring alerts",
+      "Reproduce the issue in staging environment",
+      "Identify root cause and affected systems",
+      "Implement emergency fix or rollback",
+      "Deploy hotfix to production",
+      "Monitor system stability and performance",
+      "Post-mortem analysis and prevention steps"
+    ]
+  },
+  {
+    "workflow_id": "wf_random_004",
+    "name": "Onboard new team member",
+    "description": "Set up a new engineer with all necessary tools and knowledge.",
+    "steps": [
+      "Send welcome email with team info",
+      "Set up development environment and credentials",
+      "Schedule orientation meetings with department leads",
+      "Assign initial training tasks",
+      "Schedule code review for first PR",
+      "Monthly check-in to assess progress"
+    ]
+  },
+  {
+    "workflow_id": "wf_random_005",
+    "name": "Deploy feature to staging",
+    "description": "Move a completed feature to the staging environment for testing.",
+    "steps": [
+      "Run all unit and integration tests locally",
+      "Create pull request with detailed description",
+      "Get code review from team members",
+      "Address review feedback",
+      "Merge to develop branch",
+      "Build and deploy to staging",
+      "Run smoke tests and QA verification"
+    ]
+  },
+  {
+    "workflow_id": "wf_random_006",
+    "name": "Update security policies",
+    "description": "Review and update company security policies and practices.",
+    "steps": [
+      "Review current security policy documents",
+      "Identify outdated or missing security guidelines",
+      "Research industry best practices",
+      "Draft updated policies with security team input",
+      "Get approval from compliance officer",
+      "Distribute to all staff with training requirements",
+      "Set reminder for annual policy review"
+    ]
+  },
+  {
+    "workflow_id": "wf_random_007",
+    "name": "Process customer refund request",
+    "description": "Handle a customer request for refund or credit.",
+    "steps": [
+      "Review customer account and order history",
+      "Verify refund eligibility and reason",
+      "Check refund policy and approve if qualified",
+      "Process refund through payment processor",
+      "Update customer order status",
+      "Send confirmation email with tracking",
+      "Document refund reason for analytics"
+    ]
+  },
+  {
+    "workflow_id": "wf_random_008",
+    "name": "Conduct performance review",
+    "description": "Complete annual performance review for direct report.",
+    "steps": [
+      "Gather 360-degree feedback from colleagues",
+      "Review performance metrics and achievements",
+      "Prepare observations on strengths and growth areas",
+      "Schedule private review meeting",
+      "Conduct meeting and discuss career goals",
+      "Document feedback and sign evaluation",
+      "File review document in HR system"
+    ]
+  },
+  {
+    "workflow_id": "wf_random_009",
+    "name": "Migrate database to new server",
+    "description": "Transfer database from old server to new infrastructure.",
+    "steps": [
+      "Backup current database",
+      "Plan migration timeline and communication",
+      "Set up new database server with identical specs",
+      "Test data migration process in non-prod",
+      "Schedule maintenance window",
+      "Execute database migration",
+      "Verify data integrity and run validation",
+      "Update connection strings in application",
+      "Monitor for issues post-migration"
+    ]
+  },
+  {
+    "workflow_id": "wf_random_010",
+    "name": "Prepare quarterly business review",
+    "description": "Compile metrics and prepare for quarterly business review presentation.",
+    "steps": [
+      "Collect KPI data from all departments",
+      "Analyze trends and variances from targets",
+      "Create presentation slides with visualizations",
+      "Prepare talking points and explanations",
+      "Get feedback from leadership team",
+      "Rehearse presentation",
+      "Present to stakeholders and board"
+    ]
+  }
+]
