@@ -36,7 +36,7 @@ class Workflow(BaseModel):
     workflow_id: str
     name: str
     description: str
-    steps: list[Step]  # Define the structure of steps as needed
+    steps: list[Step]  # Define the structure of steps as needed; this can be a WORKFLOW as well
 
     
 class Task(BaseModel):
