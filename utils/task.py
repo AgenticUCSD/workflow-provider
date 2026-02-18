@@ -41,6 +41,7 @@ class Task(BaseModel):
     task_id: str
     task_type: TaskTypes
     objective: Objective
+    candidate_workflows: Optional[List[Workflow]] = None
     workflow: Optional[Workflow] = None
     status: Status
     metadata: Optional[Dict[str, Any]] = None
