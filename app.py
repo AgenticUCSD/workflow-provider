@@ -1,15 +1,18 @@
+from typing import List, Literal, Optional
+
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
 
 from utils.builder_agent import BuilderAgent
 from utils.search_agent import SearchAgent
-from utils.task import Task, Workflow
+from task_identification.task import Task, Workflow
+from task_identification.task_identifier_agent import ContextItem, Metadata, TaskIdentifierAgent
 
 app = FastAPI(title="Agent Infrastructure API")
 
 builder_agent = BuilderAgent()
 search_agent = SearchAgent()
+task_identifier_agent = TaskIdentifierAgent()
 
 
 class CreateWorkflowRequest(BaseModel):
@@ -23,9 +26,23 @@ class EditWorkflowRequest(BaseModel):
     feedback: str
 
 
+class IdentifyTaskRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    subject: Optional[str] = None
+    metadata: Optional[Metadata] = None
+
+
+class IdentifyTaskResponse(BaseModel):
+    status: Literal["identified", "no_task"]
+    tasks: Optional[List[Task]] = None
+    detected_tags: Optional[List[str]] = None
+    context_items: Optional[List[ContextItem]] = None
+
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
 
 @app.post("/search_workflows", response_model=List[Workflow] | None)
 def search_workflows_endpoint(task: Task):
@@ -33,6 +50,7 @@ def search_workflows_endpoint(task: Task):
         return search_agent.query_workflows_for_task(task)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
 
 @app.post("/create_workflow", response_model=Workflow)
 def create_workflow_endpoint(request: CreateWorkflowRequest):
@@ -48,3 +66,38 @@ def edit_workflow_endpoint(request: EditWorkflowRequest):
         return builder_agent.edit_proposed_workflow(request.task, request.proposed_workflow, request.feedback)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/identify_task", response_model=IdentifyTaskResponse)
+def identify_task_endpoint(request: IdentifyTaskRequest):
+    try:
+        processed = task_identifier_agent.preprocess_email(request.text, request.subject)
+        tag_result = task_identifier_agent.detect_tags(processed, request.metadata)
+        detected_tags = [item.tag for item in tag_result.tags]
+
+        if any(tag == "no-task" for tag in detected_tags):
+            return IdentifyTaskResponse(
+                status="no_task",
+                tasks=[],
+                detected_tags=["no-task"],
+                context_items=[],
+            )
+
+        context_plan = task_identifier_agent.determine_context(
+            tag_result=tag_result,
+            processed_text=processed,
+            metadata=request.metadata,
+        )
+        tasks = task_identifier_agent.tags_to_tasks(
+            tag_result=tag_result,
+            processed_text=processed,
+            metadata=request.metadata,
+        )
+        return IdentifyTaskResponse(
+            status="identified",
+            tasks=tasks,
+            detected_tags=detected_tags,
+            context_items=context_plan.context_items,
+        )
+    except Exception:
+        raise HTTPException(status_code=502, detail="Task identification failed")

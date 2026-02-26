@@ -1,0 +1,8 @@
+{
+  "subject": "Delivery commitment",
+  "text": "I will deliver the revised implementation plan by Thursday 5 PM PT. Please track this commitment and remind me if overdue.",
+  "metadata": {
+    "source": "email",
+    "priority": "medium"
+  }
+}

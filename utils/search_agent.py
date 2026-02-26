@@ -4,7 +4,7 @@ from utils.model import model
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 
-from utils.task import Task, Workflow
+from task_identification.task import Task, Workflow
 from utils.chroma import ChromaVectorStore
 
 import uuid

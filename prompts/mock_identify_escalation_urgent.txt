@@ -1,0 +1,8 @@
+{
+  "subject": "Escalation: checkout outage",
+  "text": "Escalation: checkout is down in production and customers cannot place orders. This is urgent and blocking revenue. Please jump on this ASAP.",
+  "metadata": {
+    "source": "email",
+    "priority": "critical"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "subject": "PR review and sync",
+  "text": "Please review PR 482 and share feedback. Also schedule a 30-minute sync with Alex and Priya tomorrow afternoon.",
+  "metadata": {
+    "source": "email",
+    "priority": "high"
+  }
+}

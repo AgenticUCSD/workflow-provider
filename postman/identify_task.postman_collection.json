@@ -1,0 +1,306 @@
+{
+  "info": {
+    "_postman_id": "7df6ef17-f926-4f47-9f56-8eeb6d8f6b3f",
+    "name": "Workflow Planner - identify_task",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Sample requests for testing the /identify_task endpoint."
+  },
+  "item": [
+    {
+      "name": "Flow - Email -> Clarification -> Task Identification",
+      "item": [
+        {
+          "name": "Step 1 - Identify Task (Expect Clarification)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "pm.test(\"needs clarification\", function () {",
+                  "  pm.expect(json.status).to.eql(\"needs_clarification\");",
+                  "  pm.expect(json.clarification_id).to.be.a(\"string\");",
+                  "});",
+                  "pm.collectionVariables.set(\"clarificationId\", json.clarification_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"Need help soon\",\n  \"text\": \"Can you handle this? We should align quickly.\",\n  \"metadata\": {\n    \"source\": \"email\",\n    \"priority\": \"medium\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/identify_task",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "identify_task"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Step 2 - Submit Clarification Answers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "pm.test(\"clarification flow resolved\", function () {",
+                  "  pm.expect([\"identified\", \"failed\"]).to.include(json.status);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clarification_id\": \"{{clarificationId}}\",\n  \"answers\": {\n    \"time_window\": \"tomorrow 2pm to 4pm\",\n    \"participants\": \"alex@example.com, priya@example.com\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/identify_task/clarify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "identify_task",
+                "clarify"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Direct Identification - No Clarification Expected",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 200\", function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "const json = pm.response.json();",
+              "pm.test(\"directly identified\", function () {",
+              "  pm.expect(json.status).to.eql(\"identified\");",
+              "  pm.expect(json.tasks).to.be.an(\"array\");",
+              "  pm.expect(json.tasks.length).to.be.above(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"subject\": \"Please send onboarding packet\",\n  \"text\": \"Please send the onboarding packet to the new contractor by end of day. Include policy docs and access instructions.\",\n  \"metadata\": {\n    \"source\": \"email\",\n    \"priority\": \"medium\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/identify_task",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "identify_task"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Identify Task - No Task",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"subject\": \"FYI Weekly newsletter\",\n  \"text\": \"Hi team,\\n\\nSharing this week's company newsletter. No action needed.\\n\\nBest,\\nComms\",\n  \"metadata\": {\n    \"source\": \"email\",\n    \"priority\": \"low\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/identify_task",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "identify_task"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Identify Task - Action Request",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"subject\": \"Please send onboarding packet\",\n  \"text\": \"Please send the onboarding packet to the new contractor by end of day. Include policy docs and access instructions.\",\n  \"metadata\": {\n    \"source\": \"email\",\n    \"priority\": \"medium\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/identify_task",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "identify_task"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Identify Task - Multi Intent",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"subject\": \"PR review and sync\",\n  \"text\": \"Please review PR 482 and share feedback. Also schedule a 30-minute sync with Alex and Priya tomorrow afternoon.\",\n  \"metadata\": {\n    \"source\": \"email\",\n    \"priority\": \"high\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/identify_task",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "identify_task"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Identify Task - Commitment Track",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"subject\": \"Delivery commitment\",\n  \"text\": \"I will deliver the revised implementation plan by Thursday 5 PM PT. Please track this commitment and remind me if overdue.\",\n  \"metadata\": {\n    \"source\": \"email\",\n    \"priority\": \"medium\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/identify_task",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "identify_task"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Identify Task - Escalation Urgent",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"subject\": \"Escalation: checkout outage\",\n  \"text\": \"Escalation: checkout is down in production and customers cannot place orders. This is urgent and blocking revenue. Please jump on this ASAP.\",\n  \"metadata\": {\n    \"source\": \"email\",\n    \"priority\": \"critical\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/identify_task",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "identify_task"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Identify Task - Needs Clarification",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"subject\": \"Need help soon\",\n  \"text\": \"Can you handle this? We should align quickly.\",\n  \"metadata\": {\n    \"source\": \"email\",\n    \"priority\": \"medium\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/identify_task",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "identify_task"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000"
+    },
+    {
+      "key": "clarificationId",
+      "value": ""
+    }
+  ]
+}

@@ -3,7 +3,7 @@ import uuid
 import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
 
-from utils.task import Task, Workflow
+from task_identification.task import Task, Workflow
 from utils.config import OPENAI_API_KEY
 
 

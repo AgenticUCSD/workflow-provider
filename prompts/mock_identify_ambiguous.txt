@@ -1,0 +1,8 @@
+{
+  "subject": "Need help soon",
+  "text": "Can you handle this? We should align quickly.",
+  "metadata": {
+    "source": "email",
+    "priority": "medium"
+  }
+}

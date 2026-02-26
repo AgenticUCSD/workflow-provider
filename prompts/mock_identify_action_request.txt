@@ -1,0 +1,8 @@
+{
+  "subject": "Please send onboarding packet",
+  "text": "Please send the onboarding packet to the new contractor by end of day. Include policy docs and access instructions.",
+  "metadata": {
+    "source": "email",
+    "priority": "medium"
+  }
+}

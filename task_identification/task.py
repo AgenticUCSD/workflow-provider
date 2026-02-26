@@ -9,6 +9,8 @@ class TaskTypes(str, Enum):
     REPLY_NEEDED = "reply_needed"
     REVIEW_FEEDBACK = "review_feedback"
     FORWARD_DELEGATE = "forward_delegate"
+    COMMITMENT_TRACK = "commitment_track"
+    ESCALATION_URGENT = "escalation_urgent"
 
 class Status(str, Enum):
     PENDING = "pending"

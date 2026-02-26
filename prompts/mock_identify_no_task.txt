@@ -1,0 +1,8 @@
+{
+  "subject": "FYI Weekly newsletter",
+  "text": "Hi team,\n\nSharing this week's company newsletter. No action needed.\n\nBest,\nComms",
+  "metadata": {
+    "source": "email",
+    "priority": "low"
+  }
+}

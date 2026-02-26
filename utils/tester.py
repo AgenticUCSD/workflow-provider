@@ -18,6 +18,14 @@ PROMPT_FILES = [
     os.path.join(PROMPTS_DIR, "mock_task_schedule_meeting.txt"),
     os.path.join(PROMPTS_DIR, "mock_task_check_status.txt"),
 ]
+IDENTIFY_PROMPT_FILES = [
+    os.path.join(PROMPTS_DIR, "mock_identify_no_task.txt"),
+    os.path.join(PROMPTS_DIR, "mock_identify_action_request.txt"),
+    os.path.join(PROMPTS_DIR, "mock_identify_multi_intent.txt"),
+    os.path.join(PROMPTS_DIR, "mock_identify_commitment_track.txt"),
+    os.path.join(PROMPTS_DIR, "mock_identify_escalation_urgent.txt"),
+    os.path.join(PROMPTS_DIR, "mock_identify_ambiguous.txt"),
+]
 WORKFLOWS_FILE = os.path.join(PROMPTS_DIR, "random_workflows.json")
 BASE_URL = os.environ.get("WORKFLOW_API_URL", "http://127.0.0.1:8000")
 
@@ -103,6 +111,29 @@ def search_workflows_for_task(task: Task) -> List[Workflow] | None:
         return None
 
 
+def identify_task_payload(path: str) -> Dict[str, Any]:
+    return load_task(path)
+
+
+def run_identify_task(path: str) -> None:
+    payload = identify_task_payload(path)
+    result = post_json("/identify_task", payload)
+    print(f"\n=== {path} ===")
+    print(f"status: {result.get('status')}")
+    print(f"detected_tags: {result.get('detected_tags')}")
+    print(f"context_items: {result.get('context_items')}")
+
+    tasks = result.get("tasks") or []
+    if isinstance(tasks, list) and tasks:
+        task_types = [task_item.get("task_type") for task_item in tasks if isinstance(task_item, dict)]
+        print(f"task_types: {task_types}")
+        print(f"task_count: {len(tasks)}")
+    else:
+        print("task_types: []")
+        print("task_count: 0")
+
+
+
 def main() -> int:
     initialize_vector_db()
     
@@ -150,6 +181,10 @@ def main() -> int:
             print(json.dumps(updated_workflow.model_dump(), indent=2))
         else:
             print("Edited workflow: skipped (missing proposed workflow or feedback)")
+
+    print("\n=== identify_task endpoint tests ===")
+    for path in IDENTIFY_PROMPT_FILES:
+        run_identify_task(path)
 
     return 0
 
