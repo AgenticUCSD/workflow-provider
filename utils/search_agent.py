@@ -1,4 +1,5 @@
 from typing import List, Optional
+import json
 from pydantic import BaseModel
 from utils.model import model
 from langchain.agents import create_agent
@@ -27,7 +28,7 @@ class SearchAgent:
                 You can only return workflows that are in the list of provided workflows. Do not generate new workflows and do not edit existing workflows.
                 
                 IMPORTANT: If none of the provided workflows are a good match for the task, return an empty result (workflows: null or workflows: []) 
-                Only return workflows that are truly relevant and would help solve the given task.\n\n
+                Only return workflows that are truly relevant and would fully solve the given task. Any workflows that are tangentionally related should not be returned.\n\n
                 """
             ),
         )
@@ -38,9 +39,15 @@ class SearchAgent:
         thread_id = str(uuid.uuid4())
         config = {"configurable": {"thread_id": thread_id}}
         
-        vector_db_results = self.vector_db.query_from_all_workflows(task=task, top_k=5)
+        candidate_workflows = self.vector_db.query_from_all_workflows_as_objects(task=task, top_k=5)
+        if not candidate_workflows:
+            return None
         
-        content = f"Given the following task, return a list of relevant workflows that would solve that task from the ones given to you. Task: {task.model_dump()}\n\n. Here are the set of workflows from the vector database: {vector_db_results}"
+        content = (
+            "Given the following task, return a list of relevant workflows that would solve that task from the ones given to you. "
+            f"Task: {task.model_dump()}\n\n"
+            f"Candidate workflows: {[w.model_dump() for w in candidate_workflows]}"
+        )
 
         chat = [
             {
@@ -50,12 +57,33 @@ class SearchAgent:
         ]
 
         result = self.agent.invoke({"messages": chat}, config=config)
-        return self.extract_workflows(result)
+        parsed_workflows = self.extract_workflows(result)
+        if parsed_workflows is None:
+            return candidate_workflows
+        return parsed_workflows
+
+    def _try_parse_search_result(self, payload) -> WorkflowSearchResult | None:
+        if payload is None:
+            return None
+
+        if isinstance(payload, WorkflowSearchResult):
+            return payload
+
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                return None
+
+        try:
+            return WorkflowSearchResult.model_validate(payload)
+        except Exception:
+            return None
 
     def extract_workflows(self, result) -> List[Workflow] | None:
-        # Handle WorkflowSearchResult
-        if isinstance(result, WorkflowSearchResult):
-            return result.workflows
+        parsed = self._try_parse_search_result(result)
+        if parsed is not None:
+            return parsed.workflows
         
         if isinstance(result, list) and all(isinstance(w, Workflow) for w in result):
             return result
@@ -63,30 +91,25 @@ class SearchAgent:
         if isinstance(result, dict):
             for key in ("output", "structured_output"):
                 if key in result:
-                    search_result = WorkflowSearchResult.model_validate(result[key])
-                    return search_result.workflows
+                    parsed = self._try_parse_search_result(result[key])
+                    if parsed is not None:
+                        return parsed.workflows
 
             messages = result.get("messages")
             if isinstance(messages, list):
                 for message in reversed(messages):
                     content = getattr(message, "content", None)
-                    if isinstance(content, dict):
-                        try:
-                            search_result = WorkflowSearchResult.model_validate(content)
-                            return search_result.workflows
-                        except Exception:
-                            pass
+                    parsed = self._try_parse_search_result(content)
+                    if parsed is not None:
+                        return parsed.workflows
 
                     additional = getattr(message, "additional_kwargs", None)
                     if isinstance(additional, dict):
                         for key in ("tool_calls", "parsed", "structured_output", "output"):
                             payload = additional.get(key)
-                            if isinstance(payload, dict):
-                                try:
-                                    search_result = WorkflowSearchResult.model_validate(payload)
-                                    return search_result.workflows
-                                except Exception:
-                                    pass
+                            parsed = self._try_parse_search_result(payload)
+                            if parsed is not None:
+                                return parsed.workflows
 
                     tool_calls = getattr(message, "tool_calls", None)
                     if isinstance(tool_calls, list):
@@ -96,18 +119,13 @@ class SearchAgent:
                                 args = call.get("args")
                             else:
                                 args = getattr(call, "args", None)
-                            if isinstance(args, dict):
-                                try:
-                                    search_result = WorkflowSearchResult.model_validate(args)
-                                    return search_result.workflows
-                                except Exception:
-                                    pass
+                            parsed = self._try_parse_search_result(args)
+                            if parsed is not None:
+                                return parsed.workflows
 
-            try:
-                search_result = WorkflowSearchResult.model_validate(result)
-                return search_result.workflows
-            except Exception:
-                pass
+            parsed = self._try_parse_search_result(result)
+            if parsed is not None:
+                return parsed.workflows
 
         return None  # Return None instead of raising error if no workflows found
 
