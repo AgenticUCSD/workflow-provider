@@ -3,6 +3,7 @@ from utils.model import model
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 from task_identification.task import Task, Workflow
+from deepeval.integrations.langchain import CallbackHandler
 
 import uuid
 
@@ -23,7 +24,7 @@ class BuilderAgent:
     def create_workflow_initial(self, task: Task, rejected_workflows: List[Workflow] = None):
         # Generate a unique thread ID for this task
         thread_id = str(uuid.uuid4())
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler()]}
         
         content = f"Generate a workflow for this task given the workflows the user rejected. Task: {task.model_dump()}\n\n. Rejected workflows: { [w.model_dump() for w in rejected_workflows] if rejected_workflows else 'None'}"
 
@@ -46,7 +47,7 @@ class BuilderAgent:
 
         if not thread_id:
             thread_id = str(uuid.uuid4())
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler()]}
 
         content = f"Here is the workflow you proposed for the task. Task: {task.model_dump()}\n\n Proposed workflow: {proposed_workflow.model_dump()}\n\nThe user provided the following feedback on how to improve the workflow: {feedback}\n\nEdit the workflow to address the user's feedback. Only return the updated workflow, do not include any explanations."
 
