@@ -34,6 +34,12 @@ class SearchAgent:
         )
         self.vector_db = ChromaVectorStore()
 
+    def populate_manual_workflows(self, workflows: List[Workflow]) -> List[str]:
+        return [
+            self.vector_db.add_workflow(workflow=workflow, is_generated=False)
+            for workflow in workflows
+        ]
+
     def query_workflows_for_task(self, task: Task) -> List[Workflow] | None:
         # Generate a unique thread ID for this task
         thread_id = str(uuid.uuid4())
