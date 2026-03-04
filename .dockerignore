@@ -1,0 +1,27 @@
+# VCS
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Local artifacts
+chroma_db/
+.pytest_cache/
+.coverage
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store

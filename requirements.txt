@@ -2,7 +2,6 @@ langchain
 langchain[openai]
 deepagents
 python-dotenv
-uuid
 requests
 fastapi
 uvicorn

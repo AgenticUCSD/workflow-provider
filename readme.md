@@ -27,7 +27,7 @@ Conda environment for clean local dev environments.
 conda create -n "agents_ucsd" python==3.11
 conda activate agents_ucsd
 pip install -r requirements.txt
-uvicorn app:app --reload
+uvicorn app:app --reload --port 8080
 python ./utils/tester.py
 ```
 
@@ -47,5 +47,24 @@ Task identification specifics:
 - Clarification is handled by the workflow planner module, not this endpoint.
 
 **Configuration:**
-- Set `WORKFLOW_API_URL` environment variable to point at a running server (defaults to `http://127.0.0.1:8000`)
+- Set `WORKFLOW_API_URL` environment variable to point at a running server (defaults to `http://127.0.0.1:8080`) if you want to locally test cloud endpoints. Otherwise the default works perfectly.
 - Mock tasks in `./prompts/*.txt` are JSON files that can include `rejected_workflows`, `proposed_workflow`, and `feedback` fields
+
+## Docker (Cloud Run-ready)
+
+Build locally:
+
+```bash
+docker build -t workflow-planner .
+docker run --rm -p 8080:8080 -e OPENAI_API_KEY=your_key workflow-planner
+```
+
+The container starts with:
+
+```bash
+uvicorn app:app --host 0.0.0.0 --port $PORT
+```
+
+Notes:
+- `OPENAI_API_KEY` must be provided as an environment variable (prefer Secret Manager on GCP).
+- `CHROMA_PERSIST_DIR` defaults to `/tmp/chroma_db` in the container. Cloud Run filesystem is ephemeral, so vector data does not persist across instance restarts unless you externalize storage.

@@ -9,7 +9,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from utils.task import Task, Workflow
+from task_identification.task import Task, Workflow
 from utils.chroma import ChromaVectorStore
 
 PROMPTS_DIR = os.path.join(PROJECT_ROOT, "prompts")
@@ -27,7 +27,9 @@ IDENTIFY_PROMPT_FILES = [
     os.path.join(PROMPTS_DIR, "mock_identify_ambiguous.txt"),
 ]
 WORKFLOWS_FILE = os.path.join(PROMPTS_DIR, "random_workflows.json")
-BASE_URL = os.environ.get("WORKFLOW_API_URL", "http://127.0.0.1:8000")
+BASE_URL = os.environ.get("WORKFLOW_API_URL", "http://127.0.0.1:8080")
+
+
 
 def load_task(path: str) -> Dict[str, Any]:
     with open(path, encoding="utf-8") as f:
@@ -135,6 +137,7 @@ def run_identify_task(path: str) -> None:
 
 
 def main() -> int:
+    global BASE_URL
     initialize_vector_db()
     
     for path in PROMPT_FILES:
