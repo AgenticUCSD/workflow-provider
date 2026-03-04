@@ -15,6 +15,16 @@ search_agent = SearchAgent()
 task_identifier_agent = TaskIdentifierAgent()
 
 
+def enrich_tasks_with_candidates(tasks: List[Task]) -> List[Task]:
+    for task in tasks:
+        candidates = search_agent.query_workflows_for_task(task)
+        if candidates is None:
+            created = builder_agent.create_workflow_initial(task, rejected_workflows=None)
+            candidates = [created]
+        task.candidate_workflows = candidates
+    return tasks
+
+
 class CreateWorkflowRequest(BaseModel):
     task: Task
     rejected_workflows: Optional[List[Workflow]] = None
@@ -93,9 +103,10 @@ def identify_task_endpoint(request: IdentifyTaskRequest):
             processed_text=processed,
             metadata=request.metadata,
         )
+        enriched_tasks = enrich_tasks_with_candidates(tasks)
         return IdentifyTaskResponse(
             status="identified",
-            tasks=tasks,
+            tasks=enriched_tasks,
             detected_tags=detected_tags,
             context_items=context_plan.context_items,
         )

@@ -1,7 +1,7 @@
 import unittest
 
-from utils.task import TaskTypes
-from utils.task_identifier_agent import DeadlineResult, IntentTag, TagResult, TaskIdentifierAgent
+from task_identification.task import TaskTypes
+from task_identification.task_identifier_agent import DeadlineResult, IntentTag, TagResult, TaskIdentifierAgent
 
 
 class StubStructuredModel:
