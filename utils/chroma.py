@@ -6,7 +6,7 @@ import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
 
 from task_identification.task import Task, Workflow
-from utils.config import OPENAI_API_KEY
+from utils.config import CHROMA_PERSIST_DIR, OPENAI_API_KEY
 
 
 class ChromaVectorStore:
@@ -17,7 +17,7 @@ class ChromaVectorStore:
             model_name="text-embedding-ada-002",
         )
 
-        self.client = chromadb.PersistentClient(path="./chroma_db")
+        self.client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
         self.manual_workflows = self.client.get_or_create_collection(
             name="manual_workflows",
             embedding_function=openai_ef,

@@ -49,6 +49,15 @@ class IdentifyTaskResponse(BaseModel):
     context_items: Optional[List[ContextItem]] = None
 
 
+class PopulateWorkflowsRequest(BaseModel):
+    workflows: List[Workflow] = Field(default_factory=list)
+
+
+class PopulateWorkflowsResponse(BaseModel):
+    inserted_count: int
+    document_ids: List[str]
+
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
@@ -112,3 +121,15 @@ def identify_task_endpoint(request: IdentifyTaskRequest):
         )
     except Exception:
         raise HTTPException(status_code=502, detail="Task identification failed")
+
+
+@app.post("/populate_workflows", response_model=PopulateWorkflowsResponse)
+def populate_workflows_endpoint(request: PopulateWorkflowsRequest):
+    try:
+        document_ids = search_agent.populate_manual_workflows(request.workflows)
+        return PopulateWorkflowsResponse(
+            inserted_count=len(document_ids),
+            document_ids=document_ids,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

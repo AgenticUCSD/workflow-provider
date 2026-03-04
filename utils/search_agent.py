@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from utils.model import model
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
+from deepeval.integrations.langchain import CallbackHandler
 
 from task_identification.task import Task, Workflow
 from utils.chroma import ChromaVectorStore
@@ -34,10 +35,16 @@ class SearchAgent:
         )
         self.vector_db = ChromaVectorStore()
 
+    def populate_manual_workflows(self, workflows: List[Workflow]) -> List[str]:
+        return [
+            self.vector_db.add_workflow(workflow=workflow, is_generated=False)
+            for workflow in workflows
+        ]
+
     def query_workflows_for_task(self, task: Task) -> List[Workflow] | None:
         # Generate a unique thread ID for this task
         thread_id = str(uuid.uuid4())
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler()]}
         
         candidate_workflows = self.vector_db.query_from_all_workflows_as_objects(task=task, top_k=5)
         if not candidate_workflows:

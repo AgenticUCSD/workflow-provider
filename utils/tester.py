@@ -9,8 +9,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from utils.task import Task, Workflow
-from utils.chroma import ChromaVectorStore
+from task_identification.task import Task, Workflow
 
 PROMPTS_DIR = os.path.join(PROJECT_ROOT, "prompts")
 PROMPT_FILES = [
@@ -27,7 +26,9 @@ IDENTIFY_PROMPT_FILES = [
     os.path.join(PROMPTS_DIR, "mock_identify_ambiguous.txt"),
 ]
 WORKFLOWS_FILE = os.path.join(PROMPTS_DIR, "random_workflows.json")
-BASE_URL = os.environ.get("WORKFLOW_API_URL", "http://127.0.0.1:8000")
+BASE_URL = os.environ.get("WORKFLOW_API_URL", "http://127.0.0.1:8080")
+
+
 
 def load_task(path: str) -> Dict[str, Any]:
     with open(path, encoding="utf-8") as f:
@@ -57,20 +58,7 @@ def post_json(path: str, payload: Dict[str, Any], params: Optional[Dict[str, Any
 
 
 def initialize_vector_db() -> None:
-    """Initialize vector database with random workflows if not already populated."""
-    vector_db = ChromaVectorStore()
-    
-    # Check if the database is already populated
-    try:
-        # Query with a dummy workflow to see if any workflows exist
-        existing = vector_db.manual_workflows.get()
-        if existing and existing.get("ids") and len(existing["ids"]) > 0:
-            print("Vector DB already populated with manual workflows, skipping initialization.")
-            return
-    except Exception:
-        pass
-    
-    # Load and add workflows from the JSON file
+    """Initialize manual workflows through the API route."""
     if not os.path.exists(WORKFLOWS_FILE):
         print(f"Warning: Workflows file not found at {WORKFLOWS_FILE}")
         return
@@ -78,13 +66,15 @@ def initialize_vector_db() -> None:
     try:
         with open(WORKFLOWS_FILE, "r", encoding="utf-8") as f:
             workflows_data = json.load(f)
-        
-        for workflow_data in workflows_data:
-            workflow = Workflow.model_validate(workflow_data)
-            vector_db.add_workflow(workflow, is_generated=False)
-            print(f"Added workflow: {workflow.name}")
-        
-        print(f"\nSuccessfully initialized vector DB with {len(workflows_data)} workflows.")
+
+        workflows = parse_workflows(workflows_data)
+        result = populate_workflows(workflows)
+        if result is None:
+            print("Failed to initialize manual workflows through API.")
+            return
+
+        inserted_count = result.get("inserted_count")
+        print(f"\nInitialized manual workflows through API. inserted_count={inserted_count}")
     except Exception as e:
         print(f"Error initializing vector DB: {e}")
         raise
@@ -108,6 +98,16 @@ def search_workflows_for_task(task: Task) -> List[Workflow] | None:
         return None
     except Exception as e:
         print(f"Error searching workflows: {e}")
+        return None
+
+
+def populate_workflows(workflows: List[Workflow]) -> Dict[str, Any] | None:
+    """Populate manual workflow collection through the API route."""
+    try:
+        payload = {"workflows": [workflow.model_dump() for workflow in workflows]}
+        return post_json("/populate_workflows", payload)
+    except Exception as e:
+        print(f"Error populating workflows: {e}")
         return None
 
 
@@ -135,6 +135,7 @@ def run_identify_task(path: str) -> None:
 
 
 def main() -> int:
+    global BASE_URL
     initialize_vector_db()
     
     for path in PROMPT_FILES:
