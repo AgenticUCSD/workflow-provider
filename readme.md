@@ -44,6 +44,10 @@ Task identification specifics:
 - Deadline extraction is performed during identification; if a mail says `by 5pm today`, the returned task deadline reflects that constraint.
 - For schedule tasks, detected deadlines are enforced as scheduling guardrails (`latest_scheduling_time` constraint).
 - Context resolution is returned in `context_items` with per-field `present`/`missing` status.
+- For each identified task, candidate workflows are resolved automatically:
+- First, `/search_workflows` is used to fetch relevant workflows.
+- If search returns `null`, a workflow is generated through `/create_workflow`.
+- The final `/identify_task` response returns tasks with populated `candidate_workflows`.
 - Clarification is handled by the workflow planner module, not this endpoint.
 
 **Configuration:**
