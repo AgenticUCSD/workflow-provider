@@ -3,10 +3,10 @@ from typing import List, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from utils.builder_agent import BuilderAgent
-from utils.search_agent import SearchAgent
-from task_identification.task import Task, Workflow
-from task_identification.task_identifier_agent import ContextItem, Metadata, TaskIdentifierAgent
+from agents.builder_agent import BuilderAgent
+from agents.search_agent import SearchAgent
+from utils.task import Task, Workflow
+from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
 
 app = FastAPI(title="Agent Infrastructure API")
 
@@ -15,19 +15,19 @@ search_agent = SearchAgent()
 task_identifier_agent = TaskIdentifierAgent()
 
 
-def enrich_tasks_with_candidates(tasks: List[Task]) -> List[Task]:
-    for task in tasks:
-        candidates = search_agent.query_workflows_for_task(task)
-        if candidates is None:
-            created = builder_agent.create_workflow_initial(task, rejected_workflows=None)
-            candidates = [created]
-        task.candidate_workflows = candidates
-    return tasks
+def enrich_task_with_workflows(task: Task) -> Task:
+    candidates = search_agent.query_workflows_for_task(task)
+    if candidates is None:
+        created = builder_agent.create_workflow_initial(task, rejected_workflows=None)
+        candidates = [created]
+    task.candidate_workflows = candidates
+    return task
 
 
 class CreateWorkflowRequest(BaseModel):
     task: Task
     rejected_workflows: Optional[List[Workflow]] = None
+    user_feedback: Optional[str] = None
 
 
 class EditWorkflowRequest(BaseModel):
@@ -44,9 +44,9 @@ class IdentifyTaskRequest(BaseModel):
 
 class IdentifyTaskResponse(BaseModel):
     status: Literal["identified", "no_task"]
-    tasks: Optional[List[Task]] = None
-    detected_tags: Optional[List[str]] = None
-    context_items: Optional[List[ContextItem]] = None
+    task: Optional[Task] = None
+    detected_tag: Optional[str] = None
+    context_items: List[ContextItem] = Field(default_factory=list)
 
 
 class PopulateWorkflowsRequest(BaseModel):
@@ -87,37 +87,30 @@ def edit_workflow_endpoint(request: EditWorkflowRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# identify task and then return candidate workflows
 @app.post("/identify_task", response_model=IdentifyTaskResponse)
 def identify_task_endpoint(request: IdentifyTaskRequest):
     try:
-        processed = task_identifier_agent.preprocess_email(request.text, request.subject)
-        tag_result = task_identifier_agent.detect_tags(processed, request.metadata)
-        detected_tags = [item.tag for item in tag_result.tags]
+        identification = task_identifier_agent.identify_task(
+            text=request.text,
+            subject=request.subject,
+            metadata=request.metadata,
+        )
 
-        if any(tag == "no-task" for tag in detected_tags):
+        if identification.status == "no_task" or identification.task is None:
             return IdentifyTaskResponse(
                 status="no_task",
-                tasks=[],
-                detected_tags=["no-task"],
+                task=None,
+                detected_tag=identification.detected_tag or "no-task",
                 context_items=[],
             )
 
-        context_plan = task_identifier_agent.determine_context(
-            tag_result=tag_result,
-            processed_text=processed,
-            metadata=request.metadata,
-        )
-        tasks = task_identifier_agent.tags_to_tasks(
-            tag_result=tag_result,
-            processed_text=processed,
-            metadata=request.metadata,
-        )
-        enriched_tasks = enrich_tasks_with_candidates(tasks)
+        enriched_task = enrich_task_with_workflows(identification.task)
         return IdentifyTaskResponse(
             status="identified",
-            tasks=enriched_tasks,
-            detected_tags=detected_tags,
-            context_items=context_plan.context_items,
+            task=enriched_task,
+            detected_tag=identification.detected_tag,
+            context_items=identification.context_items,
         )
     except Exception:
         raise HTTPException(status_code=502, detail="Task identification failed")

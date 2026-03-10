@@ -5,9 +5,13 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel
+from deepeval.integrations.langchain import CallbackHandler
+from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
+from pydantic import BaseModel, Field
 
-from task_identification.task import Objective, Status, Task, TaskTypes
+from utils.model import extract_structured_output
+from utils.task import Objective, Status, Task, TaskTypes
 
 MetadataValue = str | int | float | bool | None
 Metadata = dict[str, MetadataValue]
@@ -63,6 +67,13 @@ class ContextPlan(BaseModel):
 
 class ContextRequirementResult(BaseModel):
     required_context: list[str]
+
+
+class IdentifyTaskResult(BaseModel):
+    status: Literal["identified", "no_task"]
+    task: Task | None = None
+    detected_tag: str | None = None
+    context_items: list[ContextItem] = Field(default_factory=list)
 
 
 TAG_TO_TASK_TYPE: dict[str, TaskTypes] = {
@@ -134,9 +145,60 @@ class TaskIdentifierAgent:
     def __init__(self) -> None:
         from utils.model import model
 
-        self.tag_model = model.with_structured_output(TagResult)
-        self.deadline_model = model.with_structured_output(DeadlineResult)
-        self.context_planner_model = model.with_structured_output(ContextRequirementResult)
+        self.tag_agent = create_agent(
+            model=model,
+            response_format=ToolStrategy(TagResult),
+            system_prompt="You classify email intents and return only structured output.",
+        )
+        self.deadline_agent = create_agent(
+            model=model,
+            response_format=ToolStrategy(DeadlineResult),
+            system_prompt="You extract deadlines and return only structured output.",
+        )
+        self.context_planner_agent = create_agent(
+            model=model,
+            response_format=ToolStrategy(ContextRequirementResult),
+            system_prompt="You identify required execution context fields and return only structured output.",
+        )
+
+        # Backward-compatible aliases used by existing tests and callers.
+        self.tag_model = self.tag_agent
+        self.deadline_model = self.deadline_agent
+        self.context_planner_model = self.context_planner_agent
+
+    def _get_structured_runner(self, *attribute_names: str):
+        for name in attribute_names:
+            candidate = getattr(self, name, None)
+            if candidate is not None:
+                return candidate
+        raise AttributeError(f"TaskIdentifierAgent is missing structured runner: {attribute_names}")
+
+    def _agent_config(self) -> dict[str, object]:
+        thread_id = str(uuid.uuid4())
+        return {
+            "configurable": {"thread_id": thread_id},
+            "callbacks": [CallbackHandler()],
+        }
+
+    def _invoke_structured_agent(
+        self,
+        agent,
+        payload: dict[str, object],
+        model_type: type[BaseModel],
+    ) -> BaseModel:
+        chat = [{"role": "user", "content": json.dumps(payload, ensure_ascii=True)}]
+        try:
+            result = agent.invoke({"messages": chat}, config=self._agent_config())
+        except TypeError:
+            # Some tests inject lightweight stubs that only accept one positional input.
+            try:
+                result = agent.invoke(json.dumps(payload, ensure_ascii=True))
+            except TypeError:
+                result = agent.invoke({"messages": chat})
+        parsed = extract_structured_output(result, model_type)
+        if parsed is None:
+            raise ValueError(f"Could not parse {model_type.__name__} from agent result")
+        return parsed
 
     def preprocess_email(self, text: str, subject: str | None) -> str:
         normalized_lines = text.replace("\r\n", "\n").split("\n")
@@ -156,6 +218,57 @@ class TaskIdentifierAgent:
         body = self._trim_signature_and_footer(core_lines)
         return f"Subject: {subject or ''}\n\nBody:\n{body}".strip()
 
+    def identify_task(self, text: str, subject: str | None, metadata: Metadata | None) -> IdentifyTaskResult:
+        processed = self.preprocess_email(text, subject)
+        tag_result = self.detect_tags(processed, metadata)
+        detected_tags = [item.tag for item in tag_result.tags]
+
+        if any(tag == "no-task" for tag in detected_tags):
+            return IdentifyTaskResult(
+                status="no_task",
+                task=None,
+                detected_tag="no-task",
+                context_items=[],
+            )
+
+        prioritized_tag = self.prioritized_actionable_tag(tag_result)
+        if prioritized_tag is None:
+            return IdentifyTaskResult(
+                status="no_task",
+                task=None,
+                detected_tag="no-task",
+                context_items=[],
+            )
+
+        prioritized_tag_result = TagResult(
+            tags=[IntentTag(tag=prioritized_tag.tag, short_description=prioritized_tag.short_description)]
+        )
+
+        context_plan = self.determine_context(
+            tag_result=prioritized_tag_result,
+            processed_text=processed,
+            metadata=metadata,
+        )
+        task = self.tags_to_task(
+            tag_result=prioritized_tag_result,
+            processed_text=processed,
+            metadata=metadata,
+        )
+        if task is None:
+            return IdentifyTaskResult(
+                status="no_task",
+                task=None,
+                detected_tag="no-task",
+                context_items=context_plan.context_items,
+            )
+
+        return IdentifyTaskResult(
+            status="identified",
+            task=task,
+            detected_tag=prioritized_tag.tag,
+            context_items=context_plan.context_items,
+        )
+
     def _trim_signature_and_footer(self, lines: list[str]) -> str:
         markers = {"--", "thanks,", "best,", "regards,", "sent from my", "confidentiality notice"}
         result: list[str] = []
@@ -171,7 +284,8 @@ class TaskIdentifierAgent:
             "processed_text": processed_text,
             "metadata": metadata or {},
         }
-        response = self.tag_model.invoke(json.dumps(payload, ensure_ascii=True))
+        tag_runner = self._get_structured_runner("tag_agent", "tag_model")
+        response = self._invoke_structured_agent(tag_runner, payload, TagResult)
         parsed = response if isinstance(response, TagResult) else TagResult.model_validate(response)
         return self.normalize_tags(parsed)
 
@@ -233,8 +347,13 @@ class TaskIdentifierAgent:
             "task_types": [item.value for item in task_types],
             "allowed_fields": allowed_fields,
         }
-        response = self.context_planner_model.invoke(json.dumps(payload, ensure_ascii=True))
-        parsed = response if isinstance(response, ContextRequirementResult) else ContextRequirementResult.model_validate(response)
+        context_runner = self._get_structured_runner("context_planner_agent", "context_planner_model")
+        response = self._invoke_structured_agent(context_runner, payload, ContextRequirementResult)
+        parsed = (
+            response
+            if isinstance(response, ContextRequirementResult)
+            else ContextRequirementResult.model_validate(response)
+        )
         for field in parsed.required_context:
             if field in allowed_fields:
                 required.add(field)
@@ -290,7 +409,8 @@ class TaskIdentifierAgent:
             "processed_text": processed_text,
             "detected_tags": [item.tag for item in tag_result.tags],
         }
-        response = self.deadline_model.invoke(json.dumps(payload, ensure_ascii=True))
+        deadline_runner = self._get_structured_runner("deadline_agent", "deadline_model")
+        response = self._invoke_structured_agent(deadline_runner, payload, DeadlineResult)
         parsed = response if isinstance(response, DeadlineResult) else DeadlineResult.model_validate(response)
         if parsed.has_deadline and parsed.deadline_iso:
             return parsed
@@ -336,22 +456,30 @@ class TaskIdentifierAgent:
         )
         return deadline.isoformat()
 
-    def tags_to_tasks(self, tag_result: TagResult, processed_text: str, metadata: Metadata | None) -> list[Task]:
+    def prioritized_actionable_tag(self, tag_result: TagResult) -> IntentTag | None:
+        actionable_tags = [item for item in tag_result.tags if item.tag != "no-task"]
+        if not actionable_tags:
+            return None
+        return min(actionable_tags, key=lambda item: TAG_PRIORITY.get(item.tag, 999))
+
+    def tags_to_task(self, tag_result: TagResult, processed_text: str, metadata: Metadata | None) -> Task | None:
         deadline = self.detect_deadline(tag_result, processed_text)
-        tasks: list[Task] = []
-        for item in tag_result.tags:
-            if item.tag == "no-task":
-                continue
-            tasks.append(
-                self.build_task(
-                    task_type=TAG_TO_TASK_TYPE[item.tag],
-                    description=item.short_description,
-                    processed_text=processed_text,
-                    deadline=deadline,
-                    metadata=metadata,
-                )
-            )
-        return tasks
+        selected = self.prioritized_actionable_tag(tag_result)
+        if selected is None:
+            return None
+
+        return self.build_task(
+            task_type=TAG_TO_TASK_TYPE[selected.tag],
+            description=selected.short_description,
+            processed_text=processed_text,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    def tags_to_tasks(self, tag_result: TagResult, processed_text: str, metadata: Metadata | None) -> list[Task]:
+        """Backward-compatible wrapper that now returns at most one task."""
+        task = self.tags_to_task(tag_result, processed_text, metadata)
+        return [task] if task is not None else []
 
     def build_task(
         self,

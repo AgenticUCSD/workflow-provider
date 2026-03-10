@@ -9,7 +9,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from task_identification.task import Task, Workflow
+from utils.task import Task, Workflow
 
 PROMPTS_DIR = os.path.join(PROJECT_ROOT, "prompts")
 PROMPT_FILES = [
@@ -120,17 +120,17 @@ def run_identify_task(path: str) -> None:
     result = post_json("/identify_task", payload)
     print(f"\n=== {path} ===")
     print(f"status: {result.get('status')}")
-    print(f"detected_tags: {result.get('detected_tags')}")
+    print(f"detected_tag: {result.get('detected_tag')}")
     print(f"context_items: {result.get('context_items')}")
 
-    tasks = result.get("tasks") or []
-    if isinstance(tasks, list) and tasks:
-        task_types = [task_item.get("task_type") for task_item in tasks if isinstance(task_item, dict)]
-        print(f"task_types: {task_types}")
-        print(f"task_count: {len(tasks)}")
+    task = result.get("task")
+    if isinstance(task, dict):
+        print(f"task_type: {task.get('task_type')}")
+        candidate_workflows = task.get("candidate_workflows") or []
+        print(f"candidate_workflow_count: {len(candidate_workflows)}")
     else:
-        print("task_types: []")
-        print("task_count: 0")
+        print("task_type: None")
+        print("candidate_workflow_count: 0")
 
 
 

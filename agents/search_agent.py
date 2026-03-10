@@ -1,12 +1,11 @@
 from typing import List, Optional
-import json
 from pydantic import BaseModel
-from utils.model import model
+from utils.model import extract_structured_output, model
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 from deepeval.integrations.langchain import CallbackHandler
 
-from task_identification.task import Task, Workflow
+from utils.task import Task, Workflow
 from utils.chroma import ChromaVectorStore
 
 import uuid
@@ -69,70 +68,13 @@ class SearchAgent:
             return candidate_workflows
         return parsed_workflows
 
-    def _try_parse_search_result(self, payload) -> WorkflowSearchResult | None:
-        if payload is None:
-            return None
-
-        if isinstance(payload, WorkflowSearchResult):
-            return payload
-
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except Exception:
-                return None
-
-        try:
-            return WorkflowSearchResult.model_validate(payload)
-        except Exception:
-            return None
-
     def extract_workflows(self, result) -> List[Workflow] | None:
-        parsed = self._try_parse_search_result(result)
-        if parsed is not None:
-            return parsed.workflows
-        
         if isinstance(result, list) and all(isinstance(w, Workflow) for w in result):
             return result
 
-        if isinstance(result, dict):
-            for key in ("output", "structured_output"):
-                if key in result:
-                    parsed = self._try_parse_search_result(result[key])
-                    if parsed is not None:
-                        return parsed.workflows
-
-            messages = result.get("messages")
-            if isinstance(messages, list):
-                for message in reversed(messages):
-                    content = getattr(message, "content", None)
-                    parsed = self._try_parse_search_result(content)
-                    if parsed is not None:
-                        return parsed.workflows
-
-                    additional = getattr(message, "additional_kwargs", None)
-                    if isinstance(additional, dict):
-                        for key in ("tool_calls", "parsed", "structured_output", "output"):
-                            payload = additional.get(key)
-                            parsed = self._try_parse_search_result(payload)
-                            if parsed is not None:
-                                return parsed.workflows
-
-                    tool_calls = getattr(message, "tool_calls", None)
-                    if isinstance(tool_calls, list):
-                        for call in tool_calls:
-                            args = None
-                            if isinstance(call, dict):
-                                args = call.get("args")
-                            else:
-                                args = getattr(call, "args", None)
-                            parsed = self._try_parse_search_result(args)
-                            if parsed is not None:
-                                return parsed.workflows
-
-            parsed = self._try_parse_search_result(result)
-            if parsed is not None:
-                return parsed.workflows
+        parsed = extract_structured_output(result, WorkflowSearchResult, raise_on_error=False)
+        if parsed is not None:
+            return parsed.workflows
 
         return None  # Return None instead of raising error if no workflows found
 

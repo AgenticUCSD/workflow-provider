@@ -1,8 +1,8 @@
 from typing import List
-from utils.model import model
+from utils.model import extract_structured_output, model
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
-from task_identification.task import Task, Workflow
+from utils.task import Task, Workflow
 from deepeval.integrations.langchain import CallbackHandler
 
 import uuid
@@ -21,12 +21,14 @@ class BuilderAgent:
             ),
         )
 
-    def create_workflow_initial(self, task: Task, rejected_workflows: List[Workflow] = None):
+    def create_workflow_initial(self, task: Task, rejected_workflows: List[Workflow] = None, user_feedback: str = None) -> Workflow:
         # Generate a unique thread ID for this task
         thread_id = str(uuid.uuid4())
         config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler()]}
         
-        content = f"Generate a workflow for this task given the workflows the user rejected. Task: {task.model_dump()}\n\n. Rejected workflows: { [w.model_dump() for w in rejected_workflows] if rejected_workflows else 'None'}"
+        rejected_workflows = [w.model_dump() for w in rejected_workflows] if rejected_workflows else None
+
+        content = f"Generate a workflow for this task given the workflows the user rejected and potential user feedback. Task: {task.model_dump()}\n\n. Rejected workflows: { rejected_workflows }\n\n User feedback on the rejected workflows: {user_feedback}"
 
         chat = [
             {
@@ -62,54 +64,10 @@ class BuilderAgent:
         return self.extract_workflow(result)
 
     def extract_workflow(self, result) -> Workflow:
-        if isinstance(result, Workflow):
-            return result
-
-        if isinstance(result, dict):
-            for key in ("output", "structured_output"):
-                if key in result:
-                    return Workflow.model_validate(result[key])
-
-            messages = result.get("messages")
-            if isinstance(messages, list):
-                for message in reversed(messages):
-                    content = getattr(message, "content", None)
-                    if isinstance(content, dict):
-                        try:
-                            return Workflow.model_validate(content)
-                        except Exception:
-                            pass
-
-                    additional = getattr(message, "additional_kwargs", None)
-                    if isinstance(additional, dict):
-                        for key in ("tool_calls", "parsed", "structured_output", "output"):
-                            payload = additional.get(key)
-                            if isinstance(payload, dict):
-                                try:
-                                    return Workflow.model_validate(payload)
-                                except Exception:
-                                    pass
-
-                    tool_calls = getattr(message, "tool_calls", None)
-                    if isinstance(tool_calls, list):
-                        for call in tool_calls:
-                            args = None
-                            if isinstance(call, dict):
-                                args = call.get("args")
-                            else:
-                                args = getattr(call, "args", None)
-                            if isinstance(args, dict):
-                                try:
-                                    return Workflow.model_validate(args)
-                                except Exception:
-                                    pass
-
-            try:
-                return Workflow.model_validate(result)
-            except Exception:
-                pass
-
-        raise ValueError("Could not parse workflow from agent result")
+        parsed = extract_structured_output(result, Workflow)
+        if parsed is None:
+            raise ValueError("Could not parse workflow from agent result")
+        return parsed
 
     def process_result(self, result):
         for message in result["messages"]:

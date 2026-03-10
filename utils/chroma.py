@@ -5,7 +5,7 @@ from typing import List, Optional
 import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
 
-from task_identification.task import Task, Workflow
+from utils.task import Task, Workflow
 from utils.config import CHROMA_PERSIST_DIR, OPENAI_API_KEY
 
 
