@@ -26,6 +26,7 @@ from utils.task import Objective, Status, Task, TaskTypes, Workflow
 
 
 IDENTIFY_PATH = "/identify_task"
+EDIT_TASK_PATH = "/edit_task"
 
 
 class StubStructuredModel:
@@ -122,6 +123,21 @@ class TaskIdentifierAgentTests(unittest.TestCase):
         assert task is not None
         self.assertEqual(task.task_type, TaskTypes.ESCALATION_URGENT)
         self.assertEqual(list(task.objective.inputs.keys()), ["processed_text"])
+
+    def test_edit_task_returns_updated_task(self) -> None:
+        agent = self.make_agent()
+        original = build_task(TaskTypes.ACTION_REQUIRED)
+        updated = build_task(TaskTypes.ACTION_REQUIRED)
+        updated.objective.description = "Email the project team with today's progress, blockers, and ETA request."
+        updated.objective.inputs["assignee"] = "alex@example.com"
+        updated.metadata = {"source": "test", "feedback": "Add ETA request"}
+        agent.task_editor_model = StubStructuredModel(updated)
+
+        result = agent.edit_task(original, "Add a line asking for an ETA on staging access.")
+
+        self.assertEqual(result.objective.description, updated.objective.description)
+        self.assertEqual(result.objective.inputs["assignee"], "alex@example.com")
+        self.assertEqual(result.metadata, updated.metadata)
 
     def test_schedule_task_has_deadline_guardrail(self) -> None:
         agent = self.make_agent()
@@ -341,6 +357,29 @@ class IdentifyEndpointTests(unittest.TestCase):
     def test_identify_malformed_metadata_returns_422(self) -> None:
         response = self.client.post(IDENTIFY_PATH, json={"text": "Please do this", "metadata": ["invalid"]})
         self.assertEqual(response.status_code, 422)
+
+    def test_edit_task_endpoint_returns_updated_task(self) -> None:
+        original = build_task(TaskTypes.ACTION_REQUIRED)
+        updated = build_task(TaskTypes.ACTION_REQUIRED)
+        updated.objective.description = "Updated task description from feedback"
+
+        with patch.object(app_module.task_identifier_agent, "edit_task", return_value=updated) as mock_edit:
+            response = self.client.post(
+                EDIT_TASK_PATH,
+                json={
+                    "task": original.model_dump(),
+                    "user_feedback": "Please include the missing context item.",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "edited")
+        self.assertEqual(body["task"]["task_id"], updated.task_id)
+        self.assertEqual(body["task"]["objective"]["description"], updated.objective.description)
+        self.assertEqual(body["detected_tag"], None)
+        self.assertEqual(body["context_items"], [])
+        mock_edit.assert_called_once()
 
 
 if __name__ == "__main__":

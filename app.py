@@ -36,6 +36,11 @@ class EditWorkflowRequest(BaseModel):
     feedback: str
 
 
+class EditTaskRequest(BaseModel):
+    task: Task
+    user_feedback: str
+
+
 class IdentifyTaskRequest(BaseModel):
     text: str = Field(..., min_length=1)
     subject: Optional[str] = None
@@ -44,6 +49,13 @@ class IdentifyTaskRequest(BaseModel):
 
 class IdentifyTaskResponse(BaseModel):
     status: Literal["identified", "no_task"]
+    task: Optional[Task] = None
+    detected_tag: Optional[str] = None
+    context_items: List[ContextItem] = Field(default_factory=list)
+
+
+class EditTaskResponse(BaseModel):
+    status: Literal["edited"]
     task: Optional[Task] = None
     detected_tag: Optional[str] = None
     context_items: List[ContextItem] = Field(default_factory=list)
@@ -83,6 +95,22 @@ def create_workflow_endpoint(request: CreateWorkflowRequest):
 def edit_workflow_endpoint(request: EditWorkflowRequest):
     try:
         return builder_agent.edit_proposed_workflow(request.task, request.proposed_workflow, request.feedback)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/edit_task", response_model=EditTaskResponse)
+def edit_task_endpoint(request: EditTaskRequest):
+    try:
+        edited_task = task_identifier_agent.edit_task(request.task, request.user_feedback)
+        detected_tag = getattr(edited_task, "detected_tag", None)
+        context_items = getattr(edited_task, "context_items", [])
+        return EditTaskResponse(
+            status="edited",
+            task=edited_task,
+            detected_tag=detected_tag,
+            context_items=context_items,
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

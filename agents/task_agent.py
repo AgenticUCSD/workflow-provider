@@ -124,6 +124,14 @@ Return only fields from allowed_fields.
 Return only JSON matching ContextRequirementResult.
 """.strip()
 
+TASK_EDITOR_PROMPT = """
+Revise the provided task using the user's feedback.
+The feedback may include explicit missing context items and/or general guidance.
+Preserve the original task identity and status unless the feedback clearly requires a change.
+Merge any filled-in context into the task objective inputs, constraints, or metadata as appropriate.
+Return only JSON matching Task.
+""".strip()
+
 CONTEXT_REQUIRED_BY_TASK_TYPE: dict[TaskTypes, list[ContextItemType]] = {
     TaskTypes.SCHEDULE: [
         ContextItemType.PARTICIPANTS,
@@ -160,11 +168,17 @@ class TaskIdentifierAgent:
             response_format=ToolStrategy(ContextRequirementResult),
             system_prompt="You identify required execution context fields and return only structured output.",
         )
+        self.task_editor_agent = create_agent(
+            model=model,
+            response_format=ToolStrategy(Task),
+            system_prompt="You revise tasks using feedback and return only structured output.",
+        )
 
         # Backward-compatible aliases used by existing tests and callers.
         self.tag_model = self.tag_agent
         self.deadline_model = self.deadline_agent
         self.context_planner_model = self.context_planner_agent
+        self.task_editor_model = self.task_editor_agent
 
     def _get_structured_runner(self, *attribute_names: str):
         for name in attribute_names:
@@ -268,6 +282,17 @@ class TaskIdentifierAgent:
             detected_tag=prioritized_tag.tag,
             context_items=context_plan.context_items,
         )
+
+    def edit_task(self, task: Task, user_feedback: str) -> Task:
+        payload = {
+            "instructions": TASK_EDITOR_PROMPT,
+            "task": task.model_dump(),
+            "user_feedback": user_feedback,
+        }
+        editor_runner = self._get_structured_runner("task_editor_agent", "task_editor_model")
+        response = self._invoke_structured_agent(editor_runner, payload, Task)
+        parsed = response if isinstance(response, Task) else Task.model_validate(response)
+        return parsed
 
     def _trim_signature_and_footer(self, lines: list[str]) -> str:
         markers = {"--", "thanks,", "best,", "regards,", "sent from my", "confidentiality notice"}

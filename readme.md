@@ -13,6 +13,7 @@ FastAPI + Uvicorn webserver with a three-agent system (BuilderAgent, SearchAgent
 ### API Endpoints
 - `POST /create_workflow` accepts a `CreateWorkflowRequest` (`task`, optional `rejected_workflows`, optional `user_feedback`) and returns a structured `Workflow`
 - `POST /edit_workflow` accepts an `EditWorkflowRequest` (task, proposed_workflow, feedback) and returns an updated `Workflow`
+- `POST /edit_task` accepts an `EditTaskRequest` (`task`, `user_feedback`) and returns an `EditTaskResponse` with `status: "edited"`, the edited `Task`, and any detected tag/context items
 - `POST /search_workflows` accepts a `Task` and returns relevant workflows from the vector database using RAG
 - `POST /identify_task` accepts raw text/email input and returns one of:
   - `identified` with `task: Task`, `detected_tag: str`, and `context_items: List[ContextItem]`
