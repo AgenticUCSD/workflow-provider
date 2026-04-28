@@ -15,15 +15,6 @@ search_agent = SearchAgent()
 task_identifier_agent = TaskIdentifierAgent()
 
 
-def enrich_task_with_workflows(task: Task) -> Task:
-    candidates = search_agent.query_workflows_for_task(task)
-    if candidates is None:
-        created = builder_agent.create_workflow_initial(task, rejected_workflows=None)
-        candidates = [created]
-    task.candidate_workflows = candidates
-    return task
-
-
 class CreateWorkflowRequest(BaseModel):
     task: Task
     rejected_workflows: Optional[List[Workflow]] = None
@@ -132,17 +123,23 @@ def identify_task_endpoint(request: IdentifyTaskRequest):
                 detected_tag=identification.detected_tag or "no-task",
                 context_items=[],
             )
-
-        enriched_task = enrich_task_with_workflows(identification.task)
         return IdentifyTaskResponse(
             status="identified",
-            task=enriched_task,
+            task=identification.task,
             detected_tag=identification.detected_tag,
             context_items=identification.context_items,
         )
     except Exception:
         raise HTTPException(status_code=502, detail="Task identification failed")
 
+@app.post("/enrich_task_with_workflows", response_model=Task)
+def enrich_task_with_workflows_endpoint(task: Task):
+    candidates = search_agent.query_workflows_for_task(task)
+    if candidates is None:
+        created = builder_agent.create_workflow_initial(task, rejected_workflows=None)
+        candidates = [created]
+    task.candidate_workflows = candidates
+    return task
 
 @app.post("/populate_workflows", response_model=PopulateWorkflowsResponse)
 def populate_workflows_endpoint(request: PopulateWorkflowsRequest):

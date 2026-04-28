@@ -115,6 +115,15 @@ def identify_task_payload(path: str) -> Dict[str, Any]:
     return load_task(path)
 
 
+def enrich_task_with_workflows(task: Task) -> Optional[Task]:
+    try:
+        result = post_json("/enrich_task_with_workflows", task.model_dump())
+        return Task.model_validate(result)
+    except Exception as e:
+        print(f"Error enriching task with workflows: {e}")
+        return None
+
+
 def run_identify_task(path: str) -> None:
     payload = identify_task_payload(path)
     result = post_json("/identify_task", payload)
@@ -128,6 +137,11 @@ def run_identify_task(path: str) -> None:
         print(f"task_type: {task.get('task_type')}")
         candidate_workflows = task.get("candidate_workflows") or []
         print(f"candidate_workflow_count: {len(candidate_workflows)}")
+
+        enriched_task = enrich_task_with_workflows(Task.model_validate(task))
+        if enriched_task is not None:
+            enriched_candidates = enriched_task.candidate_workflows or []
+            print(f"enriched_candidate_workflow_count: {len(enriched_candidates)}")
     else:
         print("task_type: None")
         print("candidate_workflow_count: 0")

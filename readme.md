@@ -18,6 +18,7 @@ FastAPI + Uvicorn webserver with a three-agent system (BuilderAgent, SearchAgent
 - `POST /identify_task` accepts raw text/email input and returns one of:
   - `identified` with `task: Task`, `detected_tag: str`, and `context_items: List[ContextItem]`
   - `no_task` with `task: null`, `detected_tag: "no-task"`, and empty `context_items`
+- `POST /enrich_task_with_workflows` accepts a `Task`, attaches candidate workflows, and returns the enriched task
 - `POST /populate_workflows` accepts `{ workflows: List[Workflow] }` and returns inserted IDs/count for the manual workflow collection
 - `GET /health` for health checks
 
@@ -34,7 +35,7 @@ python .\tests\test_suite.py
 ```
 
 ### Testing
-The integration test suite (`tests/test_suite.py`) initializes the vector database and tests workflow + task-identification endpoints:
+The integration test suite (`tests/test_suite.py`) initializes the vector database and tests workflow, task-identification, and task-enrichment endpoints:
 
 1. **Vector DB Initialization**: Loads workflows from `prompts/random_workflows.json` into ChromaDB (manual_workflows collection) on first run
 2. **Manual Workflow Population**: Calls `/populate_workflows` to seed the manual workflow collection
@@ -42,15 +43,14 @@ The integration test suite (`tests/test_suite.py`) initializes the vector databa
 4. **Workflow Creation**: Tests `/create_workflow` with task and optional rejected workflows
 5. **Workflow Editing**: Tests `/edit_workflow` if `proposed_workflow` and `feedback` are provided in the mock task file
 6. **Task Identification**: Tests `/identify_task` using prompt fixtures for `no_task`, single-intent, multi-intent, commitment tracking, urgent escalation, and ambiguous inputs
+7. **Task Enrichment**: Tests `/enrich_task_with_workflows` separately so identification no longer depends on workflow lookup
 
 **Task identification specifics:**
 - Deadline extraction is performed during identification; if a mail says `by 5pm today`, the returned task deadline reflects that constraint.
 - For schedule tasks, detected deadlines are enforced as scheduling guardrails (`latest_scheduling_time` constraint).
 - Context resolution is returned in `context_items` with per-field `present`/`missing` status.
-- For an identified task, candidate workflows are resolved automatically:
-- First, `/search_workflows` is used to fetch relevant workflows.
-- If search returns `null`, a workflow is generated through `/create_workflow`.
-- The final `/identify_task` response returns `task` with populated `candidate_workflows`.
+- `/identify_task` now returns the classified task only; workflow lookup is handled by `/enrich_task_with_workflows` after identification when candidate workflows are needed.
+- `/enrich_task_with_workflows` searches for matching workflows first and falls back to `/create_workflow` if no relevant workflows are found.
 
 
 Run unit tests:

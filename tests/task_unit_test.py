@@ -1,4 +1,4 @@
-"""Consolidated unit tests for TaskIdentifierAgent and /identify_task endpoint."""
+"""Consolidated unit tests for TaskIdentifierAgent, /identify_task, and /enrich_task_with_workflows endpoints."""
 
 import os
 import unittest
@@ -26,6 +26,7 @@ from utils.task import Objective, Status, Task, TaskTypes, Workflow
 
 
 IDENTIFY_PATH = "/identify_task"
+ENRICH_PATH = "/enrich_task_with_workflows"
 EDIT_TASK_PATH = "/edit_task"
 
 
@@ -187,7 +188,6 @@ class IdentifyEndpointTests(unittest.TestCase):
 
     def test_identify_identified_response_shape(self) -> None:
         task = build_task(TaskTypes.ACTION_REQUIRED)
-        workflows = [build_workflow("w1")]
         with (
             patch.object(app_module.task_identifier_agent, "preprocess_email", return_value="Please send status"),
             patch.object(
@@ -203,23 +203,19 @@ class IdentifyEndpointTests(unittest.TestCase):
                 ),
             ),
             patch.object(app_module.task_identifier_agent, "tags_to_task", return_value=task),
-            patch.object(app_module.search_agent, "query_workflows_for_task", return_value=workflows),
-            patch.object(app_module.builder_agent, "create_workflow_initial"),
         ):
             response = self.client.post(IDENTIFY_PATH, json={"text": "Please send status update today"})
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["status"], "identified")
         self.assertEqual(body["task"]["task_type"], "action_required")
-        self.assertEqual(len(body["task"]["candidate_workflows"]), 1)
-        self.assertEqual(body["task"]["candidate_workflows"][0]["workflow_id"], "w1")
+        self.assertIsNone(body["task"]["candidate_workflows"])
         self.assertEqual(len(body["context_items"]), 1)
         self.assertEqual(body["context_items"][0]["field"], "participants")
         self.assertEqual(body["context_items"][0]["status"], "present")
 
     def test_identify_blocked_context_response_shape(self) -> None:
         task = build_task(TaskTypes.SCHEDULE)
-        workflows = [build_workflow("w2")]
         with (
             patch.object(app_module.task_identifier_agent, "preprocess_email", return_value="Please schedule"),
             patch.object(
@@ -235,8 +231,6 @@ class IdentifyEndpointTests(unittest.TestCase):
                 ),
             ),
             patch.object(app_module.task_identifier_agent, "tags_to_task", return_value=task),
-            patch.object(app_module.search_agent, "query_workflows_for_task", return_value=workflows),
-            patch.object(app_module.builder_agent, "create_workflow_initial"),
         ):
             response = self.client.post(IDENTIFY_PATH, json={"text": "Please schedule this meeting"})
         self.assertEqual(response.status_code, 200)
@@ -245,63 +239,38 @@ class IdentifyEndpointTests(unittest.TestCase):
         self.assertEqual(len(body["context_items"]), 1)
         self.assertEqual(body["context_items"][0]["field"], "participants")
         self.assertEqual(body["context_items"][0]["status"], "missing")
-        self.assertEqual(body["task"]["candidate_workflows"][0]["workflow_id"], "w2")
+        self.assertIsNone(body["task"]["candidate_workflows"])
 
-    def test_identify_search_hit_populates_candidate_workflows(self) -> None:
+    def test_enrich_task_search_hit_populates_candidate_workflows(self) -> None:
         task = build_task(TaskTypes.REVIEW_FEEDBACK)
         workflows = [build_workflow("w-hit")]
         with (
-            patch.object(app_module.task_identifier_agent, "preprocess_email", return_value="Review this doc"),
-            patch.object(
-                app_module.task_identifier_agent,
-                "detect_tags",
-                return_value=TagResult(tags=[IntentTag(tag="review-feedback", short_description="review attached design")]),
-            ),
-            patch.object(
-                app_module.task_identifier_agent,
-                "determine_context",
-                return_value=ContextPlan(context_items=[]),
-            ),
-            patch.object(app_module.task_identifier_agent, "tags_to_task", return_value=task),
             patch.object(app_module.search_agent, "query_workflows_for_task", return_value=workflows) as mock_search,
             patch.object(app_module.builder_agent, "create_workflow_initial") as mock_create,
         ):
-            response = self.client.post(IDENTIFY_PATH, json={"text": "Review this design doc"})
+            response = self.client.post(ENRICH_PATH, json=task.model_dump())
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["task"]["candidate_workflows"][0]["workflow_id"], "w-hit")
+        self.assertEqual(body["candidate_workflows"][0]["workflow_id"], "w-hit")
         self.assertEqual(mock_search.call_count, 1)
         mock_create.assert_not_called()
 
-    def test_identify_search_miss_calls_create_and_populates_candidate_workflows(self) -> None:
+    def test_enrich_task_search_miss_calls_create_and_populates_candidate_workflows(self) -> None:
         task = build_task(TaskTypes.ACTION_REQUIRED)
         created = build_workflow("w-created")
         with (
-            patch.object(app_module.task_identifier_agent, "preprocess_email", return_value="Please do this"),
-            patch.object(
-                app_module.task_identifier_agent,
-                "detect_tags",
-                return_value=TagResult(tags=[IntentTag(tag="action-request", short_description="complete requested action")]),
-            ),
-            patch.object(
-                app_module.task_identifier_agent,
-                "determine_context",
-                return_value=ContextPlan(context_items=[]),
-            ),
-            patch.object(app_module.task_identifier_agent, "tags_to_task", return_value=task),
             patch.object(app_module.search_agent, "query_workflows_for_task", return_value=None) as mock_search,
             patch.object(app_module.builder_agent, "create_workflow_initial", return_value=created) as mock_create,
         ):
-            response = self.client.post(IDENTIFY_PATH, json={"text": "Please do this today"})
+            response = self.client.post(ENRICH_PATH, json=task.model_dump())
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["task"]["candidate_workflows"][0]["workflow_id"], "w-created")
+        self.assertEqual(body["candidate_workflows"][0]["workflow_id"], "w-created")
         self.assertEqual(mock_search.call_count, 1)
         self.assertEqual(mock_create.call_count, 1)
 
     def test_identify_multi_tag_only_returns_highest_priority_task(self) -> None:
         selected = build_task(TaskTypes.ACTION_REQUIRED)
-        searched = [build_workflow("w-search-1")]
         with (
             patch.object(app_module.task_identifier_agent, "preprocess_email", return_value="Two tasks"),
             patch.object(
@@ -320,17 +289,13 @@ class IdentifyEndpointTests(unittest.TestCase):
                 return_value=ContextPlan(context_items=[]),
             ),
             patch.object(app_module.task_identifier_agent, "tags_to_task", return_value=selected),
-            patch.object(app_module.search_agent, "query_workflows_for_task", return_value=searched) as mock_search,
-            patch.object(app_module.builder_agent, "create_workflow_initial") as mock_create,
         ):
             response = self.client.post(IDENTIFY_PATH, json={"text": "Please send summary and schedule call"})
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["status"], "identified")
         self.assertEqual(body["detected_tag"], "action-request")
-        self.assertEqual(body["task"]["candidate_workflows"][0]["workflow_id"], "w-search-1")
-        self.assertEqual(mock_search.call_count, 1)
-        mock_create.assert_not_called()
+        self.assertIsNone(body["task"]["candidate_workflows"])
 
     def test_identify_no_task_does_not_call_search_or_create(self) -> None:
         with (
