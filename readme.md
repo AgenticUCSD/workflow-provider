@@ -31,7 +31,11 @@ conda create -n "agents_ucsd" python==3.11
 conda activate agents_ucsd
 pip install -r requirements.txt
 uvicorn app:app --reload --port 8080
+#tests regular apis
 python .\tests\test_suite.py
+# tests that search only returns most relevant workflows
+python .\tests\test_strict_matching_api.py  
+
 ```
 
 ### Testing

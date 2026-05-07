@@ -23,12 +23,33 @@ class SearchAgent:
             model=model,
             response_format=ToolStrategy(WorkflowSearchResult),
             system_prompt=(
-                """You are a RAG workflow search agent. You take in a task object with additional context and a list of workflows. You will return a WorkflowSearchResult containing a list of relevant workflows that would solve that task. 
-                The workflows should be returned in order of relevance, with the most relevant workflow first. Return only workflow objects that conform to the required schema.
-                You can only return workflows that are in the list of provided workflows. Do not generate new workflows and do not edit existing workflows.
-                
-                IMPORTANT: If none of the provided workflows are a good match for the task, return an empty result (workflows: null or workflows: []) 
-                Only return workflows that are truly relevant and would fully solve the given task. Any workflows that are tangentionally related should not be returned.\n\n
+                """You are a RAG workflow search agent with STRICT matching criteria. You take in a task object with additional context and a list of workflows.
+
+                MATCHING RULE: Only return a workflow if it is a 95%+ semantic match to the task.
+
+                A 95%+ match means:
+                - The workflow directly solves the task described (not a similar but different task)
+                - The workflow's name and description align with the task's description
+                - The workflow addresses the same domain and primary action as the task
+                - The workflow would NOT require significant modification to complete the task
+
+                Examples of 95%+ matches:
+                - Task: "Schedule and run our daily team standup meeting" → Workflow: "Organize team standup" ✓
+                - Task: "Critical bug in production causing login failures - fix immediately" → Workflow: "Fix critical production bug" ✓
+
+                Examples that are NOT 95%+ matches (DO NOT return):
+                - Task: "Schedule a 1-on-1 with my manager" → Workflow: "Organize team standup" (different meeting type) ✗
+                - Task: "Book a doctor's appointment" → Workflow: "Organize team standup" (different domain entirely) ✗
+                - Task: "Create a pull request" → Workflow: "Deploy feature to staging" (only partial overlap) ✗
+
+                Return formats:
+                - If you find workflow(s) that are 95%+ matches: return them in order of relevance (best match first)
+                - If NO workflows meet the 95%+ threshold: return empty result (workflows: null or [])
+
+                You can only return workflows that are in the list of provided workflows.
+
+                When in doubt between two workflows where one is clearly a better match, return only the better match.
+                When workflows are only somewhat related, return nothing.
                 """
             ),
         )
@@ -64,8 +85,6 @@ class SearchAgent:
 
         result = self.agent.invoke({"messages": chat}, config=config)
         parsed_workflows = self.extract_workflows(result)
-        if parsed_workflows is None:
-            return candidate_workflows
         return parsed_workflows
 
     def extract_workflows(self, result) -> List[Workflow] | None:

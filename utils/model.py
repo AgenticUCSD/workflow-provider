@@ -1,4 +1,4 @@
-import json
+﻿import json
 from typing import TypeVar
 
 from langchain_openai import ChatOpenAI
@@ -38,13 +38,23 @@ def extract_structured_output(
         except Exception:
             return None
 
-    parsed = _validate(result)
-    if parsed is not None:
-        return parsed
+    # Only validate raw dicts/list if they look like the target model
+    # Skip dicts that look like LangChain results with multiple keys
+    if isinstance(result, (dict, list)):
+        if isinstance(result, dict) and len(result) > 1 and any(k in result for k in ("messages", "output", "structured_output", "structured_response")):
+            # Looks like a LangChain result - skip direct validation
+            pass
+        else:
+            parsed = _validate(result)
+            if parsed is not None:
+                return parsed
 
     if isinstance(result, dict):
-        for key in ("output", "structured_output"):
-            parsed = _validate(result.get(key))
+        for key in ("output", "structured_output", "structured_response"):
+            val = result.get(key)
+            if isinstance(val, model_type):
+                return val
+            parsed = _validate(val)
             if parsed is not None:
                 return parsed
 
