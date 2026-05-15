@@ -18,7 +18,7 @@ class WorkflowSearchResult(BaseModel):
 
 
 class SearchAgent:
-    def __init__(self):
+    def __init__(self, vector_db: ChromaVectorStore | None = None):
         self.agent = create_agent(
             model=model,
             response_format=ToolStrategy(WorkflowSearchResult),
@@ -53,7 +53,7 @@ class SearchAgent:
                 """
             ),
         )
-        self.vector_db = ChromaVectorStore()
+        self.vector_db = vector_db if vector_db is not None else ChromaVectorStore()
 
     def populate_manual_workflows(self, workflows: List[Workflow]) -> List[str]:
         return [
@@ -61,9 +61,10 @@ class SearchAgent:
             for workflow in workflows
         ]
 
-    def query_workflows_for_task(self, task: Task) -> List[Workflow] | None:
-        # Generate a unique thread ID for this task
-        thread_id = str(uuid.uuid4())
+    def query_workflows_for_task(self, task: Task, thread_id: str | None = None) -> List[Workflow] | None:
+        # Use provided thread_id or generate a unique one for this task
+        if thread_id is None:
+            thread_id = str(uuid.uuid4())
         config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler()]}
         
         candidate_workflows = self.vector_db.query_from_all_workflows_as_objects(task=task, top_k=5)

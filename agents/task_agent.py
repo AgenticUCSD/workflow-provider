@@ -187,8 +187,9 @@ class TaskIdentifierAgent:
                 return candidate
         raise AttributeError(f"TaskIdentifierAgent is missing structured runner: {attribute_names}")
 
-    def _agent_config(self) -> dict[str, object]:
-        thread_id = str(uuid.uuid4())
+    def _agent_config(self, thread_id: str | None = None) -> dict[str, object]:
+        if thread_id is None:
+            thread_id = str(uuid.uuid4())
         return {
             "configurable": {"thread_id": thread_id},
             "callbacks": [CallbackHandler()],
@@ -199,10 +200,11 @@ class TaskIdentifierAgent:
         agent,
         payload: dict[str, object],
         model_type: type[BaseModel],
+        thread_id: str | None = None,
     ) -> BaseModel:
         chat = [{"role": "user", "content": json.dumps(payload, ensure_ascii=True)}]
         try:
-            result = agent.invoke({"messages": chat}, config=self._agent_config())
+            result = agent.invoke({"messages": chat}, config=self._agent_config(thread_id=thread_id))
         except TypeError:
             # Some tests inject lightweight stubs that only accept one positional input.
             try:
@@ -232,9 +234,9 @@ class TaskIdentifierAgent:
         body = self._trim_signature_and_footer(core_lines)
         return f"Subject: {subject or ''}\n\nBody:\n{body}".strip()
 
-    def identify_task(self, text: str, subject: str | None, metadata: Metadata | None) -> IdentifyTaskResult:
+    def identify_task(self, text: str, subject: str | None, metadata: Metadata | None, thread_id: str | None = None) -> IdentifyTaskResult:
         processed = self.preprocess_email(text, subject)
-        tag_result = self.detect_tags(processed, metadata)
+        tag_result = self.detect_tags(processed, metadata, thread_id=thread_id)
         detected_tags = [item.tag for item in tag_result.tags]
 
         if any(tag == "no-task" for tag in detected_tags):
@@ -262,11 +264,13 @@ class TaskIdentifierAgent:
             tag_result=prioritized_tag_result,
             processed_text=processed,
             metadata=metadata,
+            thread_id=thread_id,
         )
         task = self.tags_to_task(
             tag_result=prioritized_tag_result,
             processed_text=processed,
             metadata=metadata,
+            thread_id=thread_id,
         )
         if task is None:
             return IdentifyTaskResult(
@@ -283,14 +287,14 @@ class TaskIdentifierAgent:
             context_items=context_plan.context_items,
         )
 
-    def edit_task(self, task: Task, user_feedback: str) -> Task:
+    def edit_task(self, task: Task, user_feedback: str, thread_id: str | None = None) -> Task:
         payload = {
             "instructions": TASK_EDITOR_PROMPT,
             "task": task.model_dump(),
             "user_feedback": user_feedback,
         }
         editor_runner = self._get_structured_runner("task_editor_agent", "task_editor_model")
-        response = self._invoke_structured_agent(editor_runner, payload, Task)
+        response = self._invoke_structured_agent(editor_runner, payload, Task, thread_id=thread_id)
         parsed = response if isinstance(response, Task) else Task.model_validate(response)
         return parsed
 
@@ -303,14 +307,14 @@ class TaskIdentifierAgent:
             result.append(line)
         return "\n".join(result).strip()
 
-    def detect_tags(self, processed_text: str, metadata: Metadata | None) -> TagResult:
+    def detect_tags(self, processed_text: str, metadata: Metadata | None, thread_id: str | None = None) -> TagResult:
         payload = {
             "instructions": CLASSIFICATION_PROMPT,
             "processed_text": processed_text,
             "metadata": metadata or {},
         }
         tag_runner = self._get_structured_runner("tag_agent", "tag_model")
-        response = self._invoke_structured_agent(tag_runner, payload, TagResult)
+        response = self._invoke_structured_agent(tag_runner, payload, TagResult, thread_id=thread_id)
         parsed = response if isinstance(response, TagResult) else TagResult.model_validate(response)
         return self.normalize_tags(parsed)
 
@@ -358,7 +362,7 @@ class TaskIdentifierAgent:
             words = words[:5]
         return " ".join(words)
 
-    def plan_required_context(self, tag_result: TagResult, processed_text: str) -> list[str]:
+    def plan_required_context(self, tag_result: TagResult, processed_text: str, thread_id: str | None = None) -> list[str]:
         task_types = [TAG_TO_TASK_TYPE[item.tag] for item in tag_result.tags if item.tag != "no-task"]
         required: set[str] = set()
         for task_type in task_types:
@@ -373,7 +377,7 @@ class TaskIdentifierAgent:
             "allowed_fields": allowed_fields,
         }
         context_runner = self._get_structured_runner("context_planner_agent", "context_planner_model")
-        response = self._invoke_structured_agent(context_runner, payload, ContextRequirementResult)
+        response = self._invoke_structured_agent(context_runner, payload, ContextRequirementResult, thread_id=thread_id)
         parsed = (
             response
             if isinstance(response, ContextRequirementResult)
@@ -384,8 +388,8 @@ class TaskIdentifierAgent:
                 required.add(field)
         return sorted(required)
 
-    def determine_context(self, tag_result: TagResult, processed_text: str, metadata: Metadata | None) -> ContextPlan:
-        required_fields = self.plan_required_context(tag_result, processed_text)
+    def determine_context(self, tag_result: TagResult, processed_text: str, metadata: Metadata | None, thread_id: str | None = None) -> ContextPlan:
+        required_fields = self.plan_required_context(tag_result, processed_text, thread_id=thread_id)
         resolved = self._auto_resolve_context(processed_text, metadata)
         items: list[ContextItem] = []
 
@@ -428,14 +432,14 @@ class TaskIdentifierAgent:
                 resolved[field] = value
         return resolved
 
-    def detect_deadline(self, tag_result: TagResult, processed_text: str) -> DeadlineResult:
+    def detect_deadline(self, tag_result: TagResult, processed_text: str, thread_id: str | None = None) -> DeadlineResult:
         payload = {
             "instructions": DEADLINE_PROMPT,
             "processed_text": processed_text,
             "detected_tags": [item.tag for item in tag_result.tags],
         }
         deadline_runner = self._get_structured_runner("deadline_agent", "deadline_model")
-        response = self._invoke_structured_agent(deadline_runner, payload, DeadlineResult)
+        response = self._invoke_structured_agent(deadline_runner, payload, DeadlineResult, thread_id=thread_id)
         parsed = response if isinstance(response, DeadlineResult) else DeadlineResult.model_validate(response)
         if parsed.has_deadline and parsed.deadline_iso:
             return parsed
@@ -487,8 +491,8 @@ class TaskIdentifierAgent:
             return None
         return min(actionable_tags, key=lambda item: TAG_PRIORITY.get(item.tag, 999))
 
-    def tags_to_task(self, tag_result: TagResult, processed_text: str, metadata: Metadata | None) -> Task | None:
-        deadline = self.detect_deadline(tag_result, processed_text)
+    def tags_to_task(self, tag_result: TagResult, processed_text: str, metadata: Metadata | None, thread_id: str | None = None) -> Task | None:
+        deadline = self.detect_deadline(tag_result, processed_text, thread_id=thread_id)
         selected = self.prioritized_actionable_tag(tag_result)
         if selected is None:
             return None

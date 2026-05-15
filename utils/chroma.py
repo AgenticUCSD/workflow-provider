@@ -188,3 +188,36 @@ class ChromaVectorStore:
     def clear_collections(self):
         self.clear_collection(is_generated=False)
         self.clear_collection(is_generated=True)
+
+    def add_single_workflow(self, workflow: Workflow, is_generated: bool = False) -> str:
+        """Add a single workflow to the vector store."""
+        return self.add_workflow(workflow, is_generated=is_generated)
+
+    def get_all_workflows(self) -> List[Workflow]:
+        """Retrieve all workflows from both collections."""
+        workflows: List[Workflow] = []
+
+        manual_count = self.manual_workflows.count()
+        generated_count = self.generated_workflows.count()
+
+        if manual_count > 0:
+            manual_results = self.manual_workflows.get(
+                ids=None,
+                include=["metadatas", "documents"]
+            )
+            workflows.extend(self._extract_workflows_from_query({
+                "metadatas": [manual_results.get("metadatas", [])],
+                "documents": [manual_results.get("documents", [])]
+            }))
+
+        if generated_count > 0:
+            generated_results = self.generated_workflows.get(
+                ids=None,
+                include=["metadatas", "documents"]
+            )
+            workflows.extend(self._extract_workflows_from_query({
+                "metadatas": [generated_results.get("metadatas", [])],
+                "documents": [generated_results.get("documents", [])]
+            }))
+
+        return workflows

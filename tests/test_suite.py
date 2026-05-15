@@ -80,10 +80,10 @@ def initialize_vector_db() -> None:
         raise
 
 
-def search_workflows_for_task(task: Task) -> List[Workflow] | None:
+def search_workflows_for_task(task: Task, thread_id: str | None = None) -> List[Workflow] | None:
     """Search for relevant workflows using the search endpoint."""
     try:
-        search_payload = task.model_dump()
+        search_payload = {"task": task.model_dump(), "thread_id": thread_id}
         result = post_json("/search_workflows", search_payload)
         
         if result is None:
@@ -111,13 +111,41 @@ def populate_workflows(workflows: List[Workflow]) -> Dict[str, Any] | None:
         return None
 
 
+def add_single_workflow(workflow: Workflow, is_generated: bool = False) -> bool:
+    """Add a single workflow to the vector store through the API route."""
+    try:
+        payload = {
+            "workflow": workflow.model_dump(),
+            "is_generated": is_generated
+        }
+        result = post_json("/add_workflow", payload)
+        return result.get("status") == "success"
+    except Exception as e:
+        print(f"Error adding workflow: {e}")
+        return False
+
+
+def list_all_workflows() -> List[Workflow] | None:
+    """Get all workflows from the vector store through the API route."""
+    try:
+        url = f"{BASE_URL.rstrip('/')}/workflows"
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+        workflows_data = result.get("workflows", [])
+        return parse_workflows(workflows_data)
+    except Exception as e:
+        print(f"Error listing workflows: {e}")
+        return None
+
+
 def identify_task_payload(path: str) -> Dict[str, Any]:
     return load_task(path)
 
 
-def enrich_task_with_workflows(task: Task) -> Optional[Task]:
+def enrich_task_with_workflows(task: Task, thread_id: str | None = None) -> Optional[Task]:
     try:
-        result = post_json("/enrich_task_with_workflows", task.model_dump())
+        result = post_json("/enrich_task_with_workflows", {"task": task.model_dump(), "thread_id": thread_id})
         return Task.model_validate(result)
     except Exception as e:
         print(f"Error enriching task with workflows: {e}")
@@ -200,6 +228,33 @@ def main() -> int:
     print("\n=== identify_task endpoint tests ===")
     for path in IDENTIFY_PROMPT_FILES:
         run_identify_task(path)
+
+    print("\n=== add_workflow and list_workflows endpoint tests ===")
+    test_workflow = Workflow(
+        workflow_id="test_add_workflow_001",
+        name="Test Workflow via Add Endpoint",
+        description="A test workflow added through the add_workflow endpoint.",
+        steps=["Step 1: Test step one", "Step 2: Test step two"]
+    )
+
+    print("\nAdding single workflow via /add_workflow...")
+    add_success = add_single_workflow(test_workflow, is_generated=False)
+    if add_success:
+        print("Successfully added workflow via /add_workflow")
+    else:
+        print("Failed to add workflow via /add_workflow")
+
+    print("\nListing all workflows via /workflows...")
+    all_workflows = list_all_workflows()
+    if all_workflows is not None:
+        print(f"Found {len(all_workflows)} total workflows")
+        test_found = any(w.workflow_id == "test_add_workflow_001" for w in all_workflows)
+        if test_found:
+            print("Test workflow confirmed in list")
+        else:
+            print("Test workflow NOT found in list")
+    else:
+        print("Failed to list workflows")
 
     return 0
 

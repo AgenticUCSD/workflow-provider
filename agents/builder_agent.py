@@ -21,9 +21,10 @@ class BuilderAgent:
             ),
         )
 
-    def create_workflow_initial(self, task: Task, rejected_workflows: List[Workflow] = None, user_feedback: str = None) -> Workflow:
-        # Generate a unique thread ID for this task
-        thread_id = str(uuid.uuid4())
+    def create_workflow_initial(self, task: Task, rejected_workflows: List[Workflow] = None, user_feedback: str = None, thread_id: str | None = None) -> Workflow:
+        # Use provided thread_id or generate a unique one for this task
+        if thread_id is None:
+            thread_id = str(uuid.uuid4())
         config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler()]}
         
         rejected_workflows = [w.model_dump() for w in rejected_workflows] if rejected_workflows else None
@@ -40,15 +41,16 @@ class BuilderAgent:
         result = self.agent.invoke({"messages": chat}, config=config)
         return self.extract_workflow(result)
 
-    def edit_proposed_workflow(self, task: Task, proposed_workflow: Workflow, feedback: str):
-        config_payload = getattr(proposed_workflow, "config", None)
-        if isinstance(config_payload, dict):
-            thread_id = config_payload.get("thread_id")
-        else:
-            thread_id = getattr(config_payload, "thread_id", None)
+    def edit_proposed_workflow(self, task: Task, proposed_workflow: Workflow, feedback: str, thread_id: str | None = None):
+        if thread_id is None:
+            config_payload = getattr(proposed_workflow, "config", None)
+            if isinstance(config_payload, dict):
+                thread_id = config_payload.get("thread_id")
+            else:
+                thread_id = getattr(config_payload, "thread_id", None)
 
-        if not thread_id:
-            thread_id = str(uuid.uuid4())
+            if not thread_id:
+                thread_id = str(uuid.uuid4())
         config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler()]}
 
         content = f"Here is the workflow you proposed for the task. Task: {task.model_dump()}\n\n Proposed workflow: {proposed_workflow.model_dump()}\n\nThe user provided the following feedback on how to improve the workflow: {feedback}\n\nEdit the workflow to address the user's feedback. Only return the updated workflow, do not include any explanations."

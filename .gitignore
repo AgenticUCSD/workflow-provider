@@ -4,8 +4,7 @@ __pycache__/
 /chroma_db/
 __pycache__/
 .vscode/
-
-# discarding files from a diff project
-credentials.json
-email_script.py
-token.json
+.pytest_cache/
+.deepeval/
+.dockerignore
+CLAUDE.md

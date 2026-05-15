@@ -136,5 +136,34 @@
       "Rehearse presentation",
       "Present to stakeholders and board"
     ]
+  },
+  {
+    "workflow_id": "wf_random_011",
+    "name": "Literature Survey",
+    "description": "Search and curate academic papers on a specified topic, deposit selected papers to user-preferred storage location.",
+    "steps": [
+      "Receive topic specification from user",
+      "Search academic databases for relevant papers",
+      "Retrieve candidate papers matching topic",
+      "Present papers to user for selection",
+      "Request destination storage from user",
+      "Deposit selected papers to specified location"
+    ]
+  },
+  {
+    "workflow_id": "wf_random_012",
+    "name": "Personal Reimbursement Processing",
+    "description": "Process personal expense reimbursements following UCSD policy requirements with proper audit documentation.",
+    "steps": [
+      "Receive reimbursement request with supporting documents",
+      "Extract receipt information and categorize expenses",
+      "Verify expense types against UCSD policy",
+      "Separate reimbursable items from excluded items",
+      "Calculate exchange rates on date of purchase",
+      "Infer purpose for each receipt item",
+      "Identify project allocation for expenses",
+      "Format entries into structured spreadsheet",
+      "Validate documentation completeness for audit"
+    ]
   }
 ]

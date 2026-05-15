@@ -7,11 +7,13 @@ from agents.builder_agent import BuilderAgent
 from agents.search_agent import SearchAgent
 from utils.task import Task, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
+from utils.chroma import ChromaVectorStore
 
 app = FastAPI(title="Agent Infrastructure API")
 
+chroma_store = ChromaVectorStore()
 builder_agent = BuilderAgent()
-search_agent = SearchAgent()
+search_agent = SearchAgent(vector_db=chroma_store)
 task_identifier_agent = TaskIdentifierAgent()
 
 
@@ -19,23 +21,27 @@ class CreateWorkflowRequest(BaseModel):
     task: Task
     rejected_workflows: Optional[List[Workflow]] = None
     user_feedback: Optional[str] = None
+    thread_id: Optional[str] = None
 
 
 class EditWorkflowRequest(BaseModel):
     task: Task
     proposed_workflow: Workflow
     feedback: str
+    thread_id: Optional[str] = None
 
 
 class EditTaskRequest(BaseModel):
     task: Task
     user_feedback: str
+    thread_id: Optional[str] = None
 
 
 class IdentifyTaskRequest(BaseModel):
     text: str = Field(..., min_length=1)
     subject: Optional[str] = None
     metadata: Optional[Metadata] = None
+    thread_id: Optional[str] = None
 
 
 class IdentifyTaskResponse(BaseModel):
@@ -61,15 +67,31 @@ class PopulateWorkflowsResponse(BaseModel):
     document_ids: List[str]
 
 
+class AddWorkflowRequest(BaseModel):
+    workflow: Workflow
+    is_generated: bool = False
+
+
+
+
+class ListWorkflowsResponse(BaseModel):
+    workflows: List[Workflow]
+
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
 
+class SearchWorkflowsRequest(BaseModel):
+    task: Task
+    thread_id: Optional[str] = None
+
+
 @app.post("/search_workflows", response_model=List[Workflow] | None)
-def search_workflows_endpoint(task: Task):
+def search_workflows_endpoint(request: SearchWorkflowsRequest):
     try:
-        return search_agent.query_workflows_for_task(task)
+        return search_agent.query_workflows_for_task(request.task, thread_id=request.thread_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -77,7 +99,12 @@ def search_workflows_endpoint(task: Task):
 @app.post("/create_workflow", response_model=Workflow)
 def create_workflow_endpoint(request: CreateWorkflowRequest):
     try:
-        return builder_agent.create_workflow_initial(request.task, request.rejected_workflows)
+        return builder_agent.create_workflow_initial(
+            request.task,
+            request.rejected_workflows,
+            request.user_feedback,
+            thread_id=request.thread_id
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -85,7 +112,12 @@ def create_workflow_endpoint(request: CreateWorkflowRequest):
 @app.post("/edit_workflow", response_model=Workflow)
 def edit_workflow_endpoint(request: EditWorkflowRequest):
     try:
-        return builder_agent.edit_proposed_workflow(request.task, request.proposed_workflow, request.feedback)
+        return builder_agent.edit_proposed_workflow(
+            request.task,
+            request.proposed_workflow,
+            request.feedback,
+            thread_id=request.thread_id
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -93,7 +125,7 @@ def edit_workflow_endpoint(request: EditWorkflowRequest):
 @app.post("/edit_task", response_model=EditTaskResponse)
 def edit_task_endpoint(request: EditTaskRequest):
     try:
-        edited_task = task_identifier_agent.edit_task(request.task, request.user_feedback)
+        edited_task = task_identifier_agent.edit_task(request.task, request.user_feedback, thread_id=request.thread_id)
         detected_tag = getattr(edited_task, "detected_tag", None)
         context_items = getattr(edited_task, "context_items", [])
         return EditTaskResponse(
@@ -114,6 +146,7 @@ def identify_task_endpoint(request: IdentifyTaskRequest):
             text=request.text,
             subject=request.subject,
             metadata=request.metadata,
+            thread_id=request.thread_id,
         )
 
         if identification.status == "no_task" or identification.task is None:
@@ -132,14 +165,19 @@ def identify_task_endpoint(request: IdentifyTaskRequest):
     except Exception:
         raise HTTPException(status_code=502, detail="Task identification failed")
 
+class EnrichTaskRequest(BaseModel):
+    task: Task
+    thread_id: Optional[str] = None
+
+
 @app.post("/enrich_task_with_workflows", response_model=Task)
-def enrich_task_with_workflows_endpoint(task: Task):
-    candidates = search_agent.query_workflows_for_task(task)
+def enrich_task_with_workflows_endpoint(request: EnrichTaskRequest):
+    candidates = search_agent.query_workflows_for_task(request.task, thread_id=request.thread_id)
     if candidates is None:
-        created = builder_agent.create_workflow_initial(task, rejected_workflows=None)
+        created = builder_agent.create_workflow_initial(request.task, rejected_workflows=None, thread_id=request.thread_id)
         candidates = [created]
-    task.candidate_workflows = candidates
-    return task
+    request.task.candidate_workflows = candidates
+    return request.task
 
 @app.post("/populate_workflows", response_model=PopulateWorkflowsResponse)
 def populate_workflows_endpoint(request: PopulateWorkflowsRequest):
@@ -149,5 +187,26 @@ def populate_workflows_endpoint(request: PopulateWorkflowsRequest):
             inserted_count=len(document_ids),
             document_ids=document_ids,
         )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/add_workflow")
+def add_workflow_endpoint(request: AddWorkflowRequest):
+    try:
+        chroma_store.add_single_workflow(
+            request.workflow,
+            is_generated=request.is_generated
+        )
+        return {"status": "success"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/workflows", response_model=ListWorkflowsResponse)
+def list_workflows_endpoint():
+    try:
+        workflows = chroma_store.get_all_workflows()
+        return ListWorkflowsResponse(workflows=workflows)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
