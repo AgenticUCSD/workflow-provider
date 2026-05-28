@@ -1,6 +1,6 @@
 {
 	"task_id": "task_check_report_001",
-	"task_type": "review_feedback",
+	"task_type": "review",
 	"objective": {
 		"objective_id": "obj_check_report_001",
 		"name": "Verify weekly report",

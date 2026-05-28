@@ -103,7 +103,7 @@ class TestStrictWorkflowMatching(unittest.TestCase):
         for workflow in cls.test_workflows:
             cls.search_agent.vector_db.add_workflow(workflow, is_generated=False)
 
-    def _create_task(self, description: str, task_type: TaskTypes = TaskTypes.ACTION_REQUIRED) -> Task:
+    def _create_task(self, description: str, task_type: TaskTypes = TaskTypes.EXECUTE) -> Task:
         """Helper to create a task with given description"""
         return Task(
             task_id="test_task_001",

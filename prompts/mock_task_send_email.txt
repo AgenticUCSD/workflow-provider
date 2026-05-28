@@ -1,6 +1,6 @@
 {
 	"task_id": "task_send_email_001",
-	"task_type": "action_required",
+	"task_type": "execute",
 	"objective": {
 		"objective_id": "obj_send_email_001",
 		"name": "Send status email",
