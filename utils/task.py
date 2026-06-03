@@ -3,14 +3,14 @@ from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
 class TaskTypes(str, Enum):
-    NO_TASK = "notask"
+    NO_TASK = "no_task"
+    DRAFT = "draft"
+    REVIEW = "review"
     SCHEDULE = "schedule"
-    ACTION_REQUIRED = "action_required"
-    REPLY_NEEDED = "reply_needed"
-    REVIEW_FEEDBACK = "review_feedback"
-    FORWARD_DELEGATE = "forward_delegate"
-    COMMITMENT_TRACK = "commitment_track"
-    ESCALATION_URGENT = "escalation_urgent"
+    RESPOND = "respond"
+    EXECUTE = "execute"
+    DECISION = "decision"
+    DELEGATE = "delegate"
 
 class Status(str, Enum):
     PENDING = "pending"
@@ -42,6 +42,7 @@ class Workflow(BaseModel):
 class Task(BaseModel):
     task_id: str
     task_type: TaskTypes
+    priority: Optional[str] = None  # "low", "normal", "high", "urgent"
     objective: Objective
     candidate_workflows: Optional[List[Workflow]] = None
     workflow: Optional[Workflow] = None

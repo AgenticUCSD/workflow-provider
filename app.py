@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from agents.builder_agent import BuilderAgent
 from agents.search_agent import SearchAgent
-from utils.task import Task, Workflow
+from utils.task import Task, TaskTypes, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
 from utils.chroma import ChromaVectorStore
 
@@ -47,14 +47,12 @@ class IdentifyTaskRequest(BaseModel):
 class IdentifyTaskResponse(BaseModel):
     status: Literal["identified", "no_task"]
     task: Optional[Task] = None
-    detected_tag: Optional[str] = None
     context_items: List[ContextItem] = Field(default_factory=list)
 
 
 class EditTaskResponse(BaseModel):
     status: Literal["edited"]
     task: Optional[Task] = None
-    detected_tag: Optional[str] = None
     context_items: List[ContextItem] = Field(default_factory=list)
 
 
@@ -126,12 +124,10 @@ def edit_workflow_endpoint(request: EditWorkflowRequest):
 def edit_task_endpoint(request: EditTaskRequest):
     try:
         edited_task = task_identifier_agent.edit_task(request.task, request.user_feedback, thread_id=request.thread_id)
-        detected_tag = getattr(edited_task, "detected_tag", None)
         context_items = getattr(edited_task, "context_items", [])
         return EditTaskResponse(
             status="edited",
             task=edited_task,
-            detected_tag=detected_tag,
             context_items=context_items,
         )
     except Exception as exc:
@@ -149,17 +145,16 @@ def identify_task_endpoint(request: IdentifyTaskRequest):
             thread_id=request.thread_id,
         )
 
-        if identification.status == "no_task" or identification.task is None:
+        task = identification.task
+        if task is None or task.task_type == TaskTypes.NO_TASK:
             return IdentifyTaskResponse(
                 status="no_task",
                 task=None,
-                detected_tag=identification.detected_tag or "no-task",
-                context_items=[],
+                context_items=identification.context_items,
             )
         return IdentifyTaskResponse(
             status="identified",
-            task=identification.task,
-            detected_tag=identification.detected_tag,
+            task=task,
             context_items=identification.context_items,
         )
     except Exception:
