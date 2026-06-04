@@ -28,7 +28,7 @@ def post_json(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return response.json()
 
 
-def create_test_task(description: str, task_type: TaskTypes = TaskTypes.ACTION_REQUIRED) -> Task:
+def create_test_task(description: str, task_type: TaskTypes = TaskTypes.EXECUTE) -> Task:
     """Helper to create a task"""
     return Task(
         task_id="test_strict_001",
