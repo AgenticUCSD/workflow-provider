@@ -8,3 +8,8 @@ __pycache__/
 .deepeval/
 .dockerignore
 CLAUDE.md
+
+# Knowledge files (runtime generated)
+knowledge/user_preferences.txt
+knowledge/task_patterns.txt
+knowledge/workflow_trends.txt

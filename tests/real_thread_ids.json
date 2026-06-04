@@ -1,0 +1,14 @@
+{
+  "thread_1_status_report": {
+    "thread_id": "real_thread_status_2b3cc8d6",
+    "scenario": "Status report workflow with workflow edit",
+    "endpoints_called": [],
+    "description": "Full workflow creation and editing cycle"
+  },
+  "thread_2_schedule_meeting": {
+    "thread_id": "real_thread_sched_82899b5b",
+    "scenario": "Schedule meeting with task edit",
+    "endpoints_called": [],
+    "description": "Scheduling task with user requirement changes"
+  }
+}
