@@ -13,11 +13,11 @@ FastAPI + Uvicorn webserver with a three-agent system (BuilderAgent, SearchAgent
 ### API Endpoints
 - `POST /create_workflow` accepts a `CreateWorkflowRequest` (`task`, optional `rejected_workflows`, optional `user_feedback`, optional `thread_id`) and returns a structured `Workflow`
 - `POST /edit_workflow` accepts an `EditWorkflowRequest` (`task`, `proposed_workflow`, `feedback`, optional `thread_id`) and returns an updated `Workflow`
-- `POST /edit_task` accepts an `EditTaskRequest` (`task`, `user_feedback`, optional `thread_id`) and returns an `EditTaskResponse` with `status: "edited"`, the edited `Task`, and any detected tag/context items
+- `POST /edit_task` accepts an `EditTaskRequest` (`task`, `user_feedback`, optional `thread_id`) and returns an `EditTaskResponse` with `status: "edited"`, the edited `Task`, and context items
 - `POST /search_workflows` accepts a `SearchWorkflowsRequest` (`task`, optional `thread_id`) and returns relevant workflows from the vector database using RAG
 - `POST /identify_task` accepts an `IdentifyTaskRequest` (`text`, optional `subject`, optional `metadata`, optional `thread_id`) and returns one of:
-  - `identified` with `task: Task`, `detected_tag: str`, and `context_items: List[ContextItem]`
-  - `no_task` with `task: null`, `detected_tag: "no-task"`, and empty `context_items`
+  - `identified` with `task: Task`, and `context_items: List[ContextItem]`
+  - `no_task` with `task: null`, and empty `context_items`
 - `POST /enrich_task_with_workflows` accepts an `EnrichTaskRequest` (`task`, optional `thread_id`), attaches candidate workflows, and returns the enriched task
 - `POST /populate_workflows` accepts `{ workflows: List[Workflow] }` and returns inserted IDs/count for the manual workflow collection
 - `GET /health` for health checks
