@@ -7,6 +7,7 @@ FastAPI + Uvicorn webserver with a three-agent system (BuilderAgent, SearchAgent
 - **BuilderAgent**: Creates and edits workflows using structured LLM output via `ToolStrategy(Workflow)`
 - **SearchAgent**: Retrieves relevant workflows from vector store using semantic similarity
 - **TaskIdentifierAgent**: Uses agent structured-output calls for intent classification, deadline extraction, context detection, and task construction
+- **AnalyzerAgent**: Analyzes traces from Confident AI to extract patterns and update knowledge files (user preferences, task patterns, workflow trends)
 - **ChromaVectorStore**: Manages two ChromaDB collections (manual_workflows, generated_workflows) with OpenAI embeddings
 
 
@@ -19,10 +20,18 @@ FastAPI + Uvicorn webserver with a three-agent system (BuilderAgent, SearchAgent
   - `identified` with `task: Task`, and `context_items: List[ContextItem]`
   - `no_task` with `task: null`, and empty `context_items`
 - `POST /enrich_task_with_workflows` accepts an `EnrichTaskRequest` (`task`, optional `thread_id`), attaches candidate workflows, and returns the enriched task
+- `POST /analyze_traces` accepts an `AnalyzeTracesRequest` (`thread_id`) and analyzes all traces from the thread to extract patterns and update knowledge files
 - `POST /populate_workflows` accepts `{ workflows: List[Workflow] }` and returns inserted IDs/count for the manual workflow collection
 - `GET /health` for health checks
 
 **Note:** All endpoints that invoke LLM agents accept an optional `thread_id` parameter. When provided, it is used for DeepEval logging to enable request tracing and observability. If not provided, a new UUID is generated automatically.
+
+**Knowledge Files:** The analyzer agent maintains three runtime-generated knowledge files in the `knowledge/` directory: `user_preferences.txt`, `task_patterns.txt`, and `workflow_trends.txt`. These are populated by analyzing traces from Confident AI and should not be committed to version control.
+
+**Environment Variables:**
+- `OPENAI_API_KEY` (required): For LLM calls and embeddings
+- `CONFIDENT_API_KEY` (required for trace analysis): For fetching traces from Confident AI API
+- `CHROMA_PERSIST_DIR` (optional): Vector DB persistence directory (default: `./chroma_db`)
 
 
 ## Setup
@@ -50,10 +59,6 @@ The container starts with:
 ```bash
 uvicorn app:app --host 0.0.0.0 --port $PORT
 ```
-
-Notes:
-- `OPENAI_API_KEY` must be provided as an environment variable (prefer Secret Manager on GCP).
-- `CHROMA_PERSIST_DIR` defaults to `/tmp/chroma_db` in the container. Cloud Run filesystem is ephemeral, so vector data does not persist across instance restarts unless you externalize storage.
 
 
 ## Testing

@@ -3,6 +3,7 @@ from typing import List, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from agents.analyzer_agent import AnalysisResult, AnalyzerAgent, TraceData
 from agents.builder_agent import BuilderAgent
 from agents.search_agent import SearchAgent
 from utils.task import Task, TaskTypes, Workflow
@@ -203,5 +204,53 @@ def list_workflows_endpoint():
     try:
         workflows = chroma_store.get_all_workflows()
         return ListWorkflowsResponse(workflows=workflows)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# Analyzer Agent
+analyzer_agent = AnalyzerAgent()
+
+
+class AnalyzeTracesRequest(BaseModel):
+    """Request to analyze traces from a thread."""
+    thread_id: str
+
+
+class AnalyzeTracesResponse(BaseModel):
+    """Response from trace analysis."""
+    status: str
+    summary: str
+    files_updated: List[str] = Field(default_factory=list)
+    user_preferences_added: List[str] = Field(default_factory=list)
+    task_patterns_added: List[str] = Field(default_factory=list)
+    workflow_trends_added: List[str] = Field(default_factory=list)
+
+
+@app.post("/analyze_traces", response_model=AnalyzeTracesResponse)
+def analyze_traces_endpoint(request: AnalyzeTracesRequest):
+    """Analyze all traces in a thread and update knowledge files.
+
+    Fetches traces from Confident AI using the provided thread_id,
+    analyzes them for patterns, and updates knowledge files with new
+    insights. Existing trends are folded/strengthened rather than duplicated.
+    """
+    try:
+        result = analyzer_agent.analyze_traces(thread_id=request.thread_id)
+
+        return AnalyzeTracesResponse(
+            status=result.status,
+            summary=result.summary,
+            files_updated=[
+                fname for fname in [
+                    "user_preferences.txt" if result.user_preferences_added else None,
+                    "task_patterns.txt" if result.task_patterns_added else None,
+                    "workflow_trends.txt" if result.workflow_trends_added else None,
+                ] if fname is not None
+            ],
+            user_preferences_added=result.user_preferences_added,
+            task_patterns_added=result.task_patterns_added,
+            workflow_trends_added=result.workflow_trends_added,
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
