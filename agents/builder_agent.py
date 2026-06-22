@@ -9,7 +9,11 @@ import uuid
 
 
 class BuilderAgent:
-    def __init__(self):
+    def __init__(self, vector_db=None):
+        # Optional vector store. When provided, generated workflows are persisted so
+        # the corpus grows and future searches can reuse them. (Dedup / a promotion
+        # gate are later-phase concerns.)
+        self.vector_db = vector_db
         self.agent = create_agent(
             model=model,
             response_format=ToolStrategy(Workflow),
@@ -39,7 +43,19 @@ class BuilderAgent:
         ]
 
         result = self.agent.invoke({"messages": chat}, config=config)
-        return self.extract_workflow(result)
+        workflow = self.extract_workflow(result)
+        self._persist_generated(workflow)
+        return workflow
+
+    def _persist_generated(self, workflow: Workflow) -> None:
+        """Persist a generated workflow to the vector store. Best-effort: a storage
+        failure (e.g. embeddings unavailable) must not fail workflow creation."""
+        if self.vector_db is None:
+            return
+        try:
+            self.vector_db.add_workflow(workflow, is_generated=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[builder] failed to persist generated workflow: {exc}")
 
     def edit_proposed_workflow(self, task: Task, proposed_workflow: Workflow, feedback: str, thread_id: str | None = None):
         if thread_id is None:

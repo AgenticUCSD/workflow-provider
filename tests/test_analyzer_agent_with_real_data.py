@@ -16,6 +16,8 @@ import os
 import unittest
 from pathlib import Path
 
+import requests
+
 # Load real thread IDs
 THREAD_IDS_FILE = Path(__file__).parent / "real_thread_ids.json"
 
@@ -26,6 +28,12 @@ if THREAD_IDS_FILE.exists():
 
 HAS_REAL_THREADS = bool(REAL_THREAD_IDS)
 HAS_API_KEY = bool(os.environ.get("CONFIDENT_API_KEY"))
+
+# A dummy OpenAI key lets the module-level ChatOpenAI in utils.model import cleanly
+# so this file can be COLLECTED and then skipped via skipUnless below. The real gate
+# for actually running these tests is CONFIDENT_API_KEY (HAS_API_KEY). Mirrors the
+# same setdefault in test_analyzer_agent.py.
+os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
 from agents.analyzer_agent import (
     ANALYZER_PATH,
@@ -51,6 +59,24 @@ class TestAnalyzerWithRealThreadData(unittest.TestCase):
         cls.agent = AnalyzerAgent()
         cls.thread_1_id = load_thread_id("thread_1_status_report")
         cls.thread_2_id = load_thread_id("thread_2_schedule_meeting")
+
+        # Probe once: if the configured threads don't exist in this Confident AI
+        # account (HTTP 404), the saved real_thread_ids.json is STALE — that's a test
+        # fixture/data problem, not a code failure, so skip the whole class with a
+        # clear message instead of failing + burning live API calls. A non-404 error
+        # (e.g. 401 bad key) is a real problem and is allowed to surface.
+        if cls.thread_1_id:
+            try:
+                cls.agent.fetch_traces_by_thread(cls.thread_1_id)
+            except requests.exceptions.HTTPError as exc:
+                status = getattr(exc.response, "status_code", None)
+                if status == 404:
+                    raise unittest.SkipTest(
+                        "Configured thread IDs not found in Confident AI (404); "
+                        "tests/real_thread_ids.json is stale. Regenerate it by running "
+                        "the provider pipeline with a thread_id and saving the new ids."
+                    )
+                raise
 
     def test_fetch_traces_thread_1_status_report(self) -> None:
         """Test fetching traces from real thread 1 (status report flow)."""

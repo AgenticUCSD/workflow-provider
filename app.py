@@ -13,7 +13,7 @@ from utils.chroma import ChromaVectorStore
 app = FastAPI(title="Agent Infrastructure API")
 
 chroma_store = ChromaVectorStore()
-builder_agent = BuilderAgent()
+builder_agent = BuilderAgent(vector_db=chroma_store)
 search_agent = SearchAgent(vector_db=chroma_store)
 task_identifier_agent = TaskIdentifierAgent()
 
@@ -125,7 +125,7 @@ def edit_workflow_endpoint(request: EditWorkflowRequest):
 def edit_task_endpoint(request: EditTaskRequest):
     try:
         edited_task = task_identifier_agent.edit_task(request.task, request.user_feedback, thread_id=request.thread_id)
-        context_items = getattr(edited_task, "context_items", [])
+        context_items = edited_task.context_items or []
         return EditTaskResponse(
             status="edited",
             task=edited_task,
