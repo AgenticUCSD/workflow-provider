@@ -1,5 +1,5 @@
 import uuid
-from typing import Literal, Optional
+from typing import Optional
 
 from deepeval.integrations.langchain import CallbackHandler
 from langchain.agents import create_agent
@@ -7,16 +7,10 @@ from langchain.agents.structured_output import ToolStrategy
 from pydantic import BaseModel, Field
 
 from utils.model import extract_structured_output, model
-from utils.task import Objective, Status, Task, TaskTypes
+from utils.task import ContextItem, Objective, Status, Task, TaskTypes
 
 MetadataValue = str | int | float | bool | None
 Metadata = dict[str, MetadataValue]
-
-
-class ContextItem(BaseModel):
-    field: str
-    status: Literal["present", "missing", "guessed"]
-    value: Optional[str] = None
 
 
 class _TaskExtraction(BaseModel):
@@ -159,6 +153,7 @@ class TaskIdentifierAgent:
         processed_text: str,
         deadline_iso: Optional[str],
         metadata: Metadata | None,
+        context_items: list[ContextItem] | None = None,
     ) -> Task:
         constraints: dict[str, MetadataValue] = {}
         if task_type == TaskTypes.SCHEDULE and deadline_iso:
@@ -188,6 +183,7 @@ class TaskIdentifierAgent:
             candidate_workflows=None,
             workflow=None,
             status=Status.PENDING,
+            context_items=context_items,
             metadata=task_metadata,
         )
 
@@ -201,6 +197,7 @@ class TaskIdentifierAgent:
             processed_text=processed_text,
             deadline_iso=extraction.deadline_iso,
             metadata=metadata,
+            context_items=extraction.context_items,
         )
 
     def edit_task(self, task: Task, user_feedback: str, thread_id: str | None = None) -> Task:

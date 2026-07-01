@@ -322,6 +322,30 @@ class IdentifyEndpointTests(unittest.TestCase):
         self.assertEqual(body["context_items"], [])
         mock_edit.assert_called_once()
 
+    def test_edit_task_endpoint_preserves_context_items(self) -> None:
+        """Regression for the dropped-params bug: when the edited task carries
+        context_items, the endpoint must return them (previously always [])."""
+        original = build_task(TaskTypes.SCHEDULE)
+        updated = build_task(TaskTypes.SCHEDULE)
+        updated.context_items = [
+            ContextItem(field="participants", status="present", value="data team")
+        ]
+
+        with patch.object(app_module.task_identifier_agent, "edit_task", return_value=updated):
+            response = self.client.post(
+                EDIT_TASK_PATH,
+                json={
+                    "task": original.model_dump(mode="json"),
+                    "user_feedback": "Add the data team as participants.",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body["context_items"]), 1)
+        self.assertEqual(body["context_items"][0]["field"], "participants")
+        self.assertEqual(body["context_items"][0]["status"], "present")
+
 
 if __name__ == "__main__":
     unittest.main()

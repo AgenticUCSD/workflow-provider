@@ -13,7 +13,7 @@ from utils.chroma import ChromaVectorStore
 app = FastAPI(title="Agent Infrastructure API")
 
 chroma_store = ChromaVectorStore()
-builder_agent = BuilderAgent()
+builder_agent = BuilderAgent(vector_db=chroma_store)
 search_agent = SearchAgent(vector_db=chroma_store)
 task_identifier_agent = TaskIdentifierAgent()
 
@@ -98,6 +98,17 @@ def search_workflows_endpoint(request: SearchWorkflowsRequest):
 @app.post("/create_workflow", response_model=Workflow)
 def create_workflow_endpoint(request: CreateWorkflowRequest):
     try:
+        # Search-before-create: on a fresh create (no rejected workflows and no
+        # feedback), reuse an existing strict match instead of generating a near-dup.
+        # A regeneration request — the user already saw candidates and rejected them,
+        # or gave feedback — skips the search and always generates a new workflow.
+        is_regeneration = bool(request.rejected_workflows) or bool(request.user_feedback)
+        if not is_regeneration:
+            matches = search_agent.query_workflows_for_task(
+                request.task, thread_id=request.thread_id
+            )
+            if matches:  # truthy => a 95%+ match exists (best match first)
+                return matches[0]
         return builder_agent.create_workflow_initial(
             request.task,
             request.rejected_workflows,
@@ -125,7 +136,7 @@ def edit_workflow_endpoint(request: EditWorkflowRequest):
 def edit_task_endpoint(request: EditTaskRequest):
     try:
         edited_task = task_identifier_agent.edit_task(request.task, request.user_feedback, thread_id=request.thread_id)
-        context_items = getattr(edited_task, "context_items", [])
+        context_items = edited_task.context_items or []
         return EditTaskResponse(
             status="edited",
             task=edited_task,

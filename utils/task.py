@@ -1,6 +1,6 @@
 from enum import Enum
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 class TaskTypes(str, Enum):
     NO_TASK = "no_task"
@@ -39,6 +39,13 @@ class Workflow(BaseModel):
         steps_str = "\n".join(f"- {step}" for step in self.steps)
         return f"Workflow: {self.name}\nDescription: {self.description}\nSteps:\n{steps_str}"
     
+class ContextItem(BaseModel):
+    """A task parameter extracted from the email: present, missing, or guessed."""
+    field: str
+    status: Literal["present", "missing", "guessed"]
+    value: Optional[str] = None
+
+
 class Task(BaseModel):
     task_id: str
     task_type: TaskTypes
@@ -47,6 +54,9 @@ class Task(BaseModel):
     candidate_workflows: Optional[List[Workflow]] = None
     workflow: Optional[Workflow] = None
     status: Status
+    # Task parameters (slots). Carried on the Task so the conversation (edit_task)
+    # can read and edit them instead of dropping them in the response envelope.
+    context_items: Optional[List[ContextItem]] = None
     metadata: Optional[Dict[str, Any]] = None
     
     def to_string(self) -> str:

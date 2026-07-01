@@ -1,5 +1,6 @@
 import uuid
 import json
+import hashlib
 from typing import List, Optional
 
 import chromadb
@@ -27,10 +28,29 @@ class ChromaVectorStore:
             embedding_function=openai_ef,
         )
 
+    @staticmethod
+    def _content_hash(workflow: Workflow) -> str:
+        """Stable content hash of a workflow, used to skip exact-duplicate inserts.
+
+        Based on the same string we embed (`to_string()`), so two workflows that
+        would embed identically hash identically.
+        """
+        return hashlib.sha256(workflow.to_string().encode("utf-8")).hexdigest()
+
     def add_workflow(self, workflow: Workflow, is_generated=True):
+        collection = self.generated_workflows if is_generated else self.manual_workflows
+        content_hash = self._content_hash(workflow)
+
+        # Dedup gate: if an identical workflow already lives in this collection, skip
+        # the insert and return the existing id. The lookup is a metadata `get` — no
+        # embedding call — so it stays cheap and offline-testable. (Exact-content
+        # dedup only; semantic near-dup matching is a deliberate follow-up.)
+        existing = collection.get(where={"content_hash": content_hash})
+        existing_ids = existing.get("ids") if isinstance(existing, dict) else None
+        if existing_ids:
+            return existing_ids[0]
 
         document_id = str(uuid.uuid4())
-        collection = self.generated_workflows if is_generated else self.manual_workflows
         collection.add(
             documents=[workflow.to_string()],
             ids=[document_id],
@@ -40,6 +60,7 @@ class ChromaVectorStore:
                     "name": workflow.name,
                     "description": workflow.description,
                     "steps": json.dumps(workflow.steps),
+                    "content_hash": content_hash,
                 }
             ],
         )
