@@ -98,6 +98,17 @@ def search_workflows_endpoint(request: SearchWorkflowsRequest):
 @app.post("/create_workflow", response_model=Workflow)
 def create_workflow_endpoint(request: CreateWorkflowRequest):
     try:
+        # Search-before-create: on a fresh create (no rejected workflows and no
+        # feedback), reuse an existing strict match instead of generating a near-dup.
+        # A regeneration request — the user already saw candidates and rejected them,
+        # or gave feedback — skips the search and always generates a new workflow.
+        is_regeneration = bool(request.rejected_workflows) or bool(request.user_feedback)
+        if not is_regeneration:
+            matches = search_agent.query_workflows_for_task(
+                request.task, thread_id=request.thread_id
+            )
+            if matches:  # truthy => a 95%+ match exists (best match first)
+                return matches[0]
         return builder_agent.create_workflow_initial(
             request.task,
             request.rejected_workflows,
