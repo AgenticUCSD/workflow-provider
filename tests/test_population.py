@@ -90,6 +90,30 @@ def test_populate_skips_unresolved(monkeypatch):
     assert out.context_items[0].value is None
 
 
+def test_populate_never_touches_present_or_guessed(monkeypatch):
+    # Regression: only status=="missing" is filled. A present-but-empty value and
+    # an already-guessed value must be left alone (and memory-unit not consulted).
+    calls = {"n": 0}
+
+    def fake(fields, **kw):
+        calls["n"] += 1
+        return []
+
+    monkeypatch.setattr(population, "resolve_slots", fake)
+    task = _task_with_items(
+        [
+            ContextItem(field="cc", status="present", value=""),
+            ContextItem(field="topic", status="guessed", value="g"),
+        ]
+    )
+
+    out = population.populate_context_items(task, user_id="u")
+    by = {c.field: c for c in out.context_items}
+    assert calls["n"] == 0  # nothing missing -> memory-unit not called
+    assert by["cc"].status == "present" and by["cc"].value == ""
+    assert by["topic"].status == "guessed" and by["topic"].value == "g"
+
+
 # ── memory_client (flag-gated) ─────────────────────────────────
 
 def test_resolve_slots_disabled_returns_empty(monkeypatch):

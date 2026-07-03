@@ -23,7 +23,7 @@ def resolve_slots(
     fields: List[str],
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
-    scope: Optional[str] = None,
+    scope: Optional[List[str]] = None,
     timeout: float = 5.0,
 ) -> List[Dict[str, Any]]:
     """Call memory-unit ``/resolve`` for the given slot names.

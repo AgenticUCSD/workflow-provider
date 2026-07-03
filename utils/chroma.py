@@ -18,6 +18,11 @@ class ChromaVectorStore:
             model_name="text-embedding-ada-002",
         )
 
+        # Keep a handle so collections re-created in clear_collection() use the
+        # same embedding function. Recreating without it persists a "default" EF,
+        # which then conflicts with this openai EF on the next startup.
+        self._embedding_fn = openai_ef
+
         self.client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
         self.manual_workflows = self.client.get_or_create_collection(
             name="manual_workflows",
@@ -200,10 +205,12 @@ class ChromaVectorStore:
         if is_generated:
             self.generated_workflows = self.client.get_or_create_collection(
                 name="generated_workflows",
+                embedding_function=self._embedding_fn,
             )
         else:
             self.manual_workflows = self.client.get_or_create_collection(
                 name="manual_workflows",
+                embedding_function=self._embedding_fn,
             )
 
     def clear_collections(self):
