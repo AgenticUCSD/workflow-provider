@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -10,6 +10,8 @@ from utils.task import Task, TaskTypes, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
 from utils.chroma import ChromaVectorStore
 from utils.population import auto_populate_enabled, populate_context_items
+from utils.template import EnrichedInstance, WorkflowTemplate
+from utils.template_store import TemplateStore
 
 app = FastAPI(title="Agent Infrastructure API")
 
@@ -17,6 +19,7 @@ chroma_store = ChromaVectorStore()
 builder_agent = BuilderAgent(vector_db=chroma_store)
 search_agent = SearchAgent(vector_db=chroma_store)
 task_identifier_agent = TaskIdentifierAgent()
+template_store = TemplateStore()
 
 
 class CreateWorkflowRequest(BaseModel):
@@ -123,6 +126,111 @@ def create_workflow_endpoint(request: CreateWorkflowRequest):
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Phase 3: workflow templates → enriched instances (additive) ──────────────
+# Templates are the versioned/parameterized form; they materialize down to the
+# flat Workflow the executor consumes via WorkflowTemplate/EnrichedInstance
+# .to_workflow(). The flat endpoints above are unchanged.
+
+class CreateTemplateRequest(BaseModel):
+    task: Task
+    user_feedback: Optional[str] = None
+    thread_id: Optional[str] = None
+    # When provided, reuse an existing template within this embedding distance
+    # instead of generating (threshold search-before-create). Omit to always
+    # generate (no false reuse until the threshold is calibrated).
+    max_distance: Optional[float] = None
+
+
+class SearchTemplatesRequest(BaseModel):
+    task: Optional[Task] = None
+    query: Optional[str] = None
+    top_k: int = 5
+    max_distance: Optional[float] = None
+
+
+class TemplateMatch(BaseModel):
+    template: WorkflowTemplate
+    distance: float
+    score: float
+
+
+class SearchTemplatesResponse(BaseModel):
+    matches: List[TemplateMatch]
+
+
+class EnrichTemplateRequest(BaseModel):
+    template_id: str
+    version: Optional[int] = None
+    bound_slots: Dict[str, str] = Field(default_factory=dict)
+    task_id: Optional[str] = None
+    specialization_scope: Optional[str] = None
+
+
+class EnrichTemplateResponse(BaseModel):
+    instance: EnrichedInstance
+    workflow: Workflow  # flat, ready for the executor's /workflow/execute
+
+
+@app.post("/create_template", response_model=WorkflowTemplate)
+def create_template_endpoint(request: CreateTemplateRequest):
+    """Generate a versioned template for a task (threshold search-before-create).
+
+    Reuses the builder to produce steps, then wraps them as a typed template with
+    slots inferred from the task. Persists the new template as a `candidate`.
+    """
+    try:
+        is_regeneration = bool(request.user_feedback)
+        if not is_regeneration and request.max_distance is not None:
+            matches = template_store.search_templates(
+                request.task.to_string(), top_k=1, max_distance=request.max_distance
+            )
+            if matches:
+                return matches[0]["template"]
+
+        workflow = builder_agent.create_workflow_initial(
+            request.task, None, request.user_feedback, thread_id=request.thread_id
+        )
+        template = WorkflowTemplate.from_workflow(workflow, task=request.task)
+        template_store.add_template(template)
+        return template
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/search_templates", response_model=SearchTemplatesResponse)
+def search_templates_endpoint(request: SearchTemplatesRequest):
+    """Score-based template search (returns distance + monotonic score per match)."""
+    query = request.query or (request.task.to_string() if request.task else "")
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="Provide a task or a query")
+    try:
+        matches = template_store.search_templates(
+            query, top_k=request.top_k, max_distance=request.max_distance
+        )
+        return SearchTemplatesResponse(matches=[TemplateMatch(**m) for m in matches])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/enrich_template", response_model=EnrichTemplateResponse)
+def enrich_template_endpoint(request: EnrichTemplateRequest):
+    """Bind slots to a template → an EnrichedInstance + the flat Workflow to run.
+
+    Records the exact template_id@version (lineage) and any still-missing required
+    slots so the caller can fall back to HITL.
+    """
+    template = template_store.get_template(request.template_id, version=request.version)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    instance = EnrichedInstance.from_template(
+        template,
+        bound_slots=request.bound_slots,
+        task_id=request.task_id,
+        specialization_scope=request.specialization_scope,
+    )
+    return EnrichTemplateResponse(instance=instance, workflow=instance.to_workflow())
 
 
 @app.post("/edit_workflow", response_model=Workflow)
