@@ -310,19 +310,23 @@ wire the provider's population step to call it. This makes memory-unit part of t
 without waiting on the shared store or the eval harness. Ship behind flags; treat Phase 1 as a
 migration that these can later move onto.
 
-> **Implemented this session (flag-gated MVP).** A first, safe slice of this path is in code:
-> - memory-unit — `MemoryUnit.resolve(fields, ...)` returns structured `{field, value, source,
->   confidence, status}` slots (deterministic BM25 over the unified index, vector fallback), exposed
->   as `POST /resolve` behind the existing owner guard (`core.py`, `api.py`).
-> - provider — `ContextItem` gained optional `source`/`confidence` (additive; the executor ignores
->   the unknown nested fields); `utils/memory_client.py` (stdlib-only, flag-gated on `MEMORY_URL`,
->   never raises) + `utils/population.py` fill *missing* slots from context and mark them `guessed`
->   with provenance; `POST /populate_task_context` wires it in. Existing endpoints/behavior unchanged
->   when `MEMORY_URL` is unset.
-> - Tests: memory-unit 58, provider 39 (offline). **Not yet done** (still open in this phase):
->   hierarchical scope, write-back, server-side token *validation*, LLM value-extraction (today the
->   resolved `value` is the best evidence snippet), and calling populate from the live identify/enrich
->   flow (a dedicated endpoint exists; auto-wiring into the flow is deferred).
+> **Implemented this session (flag-gated MVP).** A working slice of this path is in code:
+> - memory-unit — `MemoryUnit.resolve(fields, ...)` returns structured `{field, value, evidence,
+>   source, confidence, status}` slots (deterministic BM25 over the unified index, vector fallback),
+>   exposed as `POST /resolve` behind the owner guard. Values are **extracted** to a concise form
+>   (email/number/clause), keeping the snippet as `evidence`. **Server-side Google token validation**
+>   now runs at `/hydrate` + `/refresh` (`memory_unit/auth.py`; on by default, `MEMORY_VALIDATE_TOKEN=false`
+>   to disable). **Write-back** (`learn()` + `POST /learn`) ingests distilled context into the index
+>   and a durable JSONL re-applied on hydrate.
+> - provider — `ContextItem` gained optional `source`/`confidence` (additive; the executor ignores the
+>   unknown nested fields); `utils/memory_client.py` (stdlib-only, flag-gated on `MEMORY_URL`, never
+>   raises) + `utils/population.py` fill *missing* slots and mark them `guessed` with provenance;
+>   `POST /populate_task_context` and, behind `MEMORY_AUTO_POPULATE` (default off), the live
+>   `/identify_task` flow both wire it in. Behavior unchanged when the flags are unset.
+> - Tests: memory-unit 75, provider 41 (offline). Fixed a real bug: snake_case slot names matched
+>   nothing (BM25 tokenizer drops `_`-joined words). **Still open in this phase:** hierarchical scope,
+>   and *durable* Drive write-back (today's write-back persists to `persist_dir`, ephemeral on Cloud
+>   Run until the Phase-1 shared store / extension-owned Drive write lands).
 
 ## Risks / gotchas
 - **Executor boundary is `List[str]` + `extra="forbid"`.** Any typed-Step or extra field sent to
