@@ -1,6 +1,6 @@
 from typing import List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from agents.analyzer_agent import AnalysisResult, AnalyzerAgent, TraceData
@@ -9,6 +9,7 @@ from agents.search_agent import SearchAgent
 from utils.task import Task, TaskTypes, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
 from utils.chroma import ChromaVectorStore
+from utils.population import populate_context_items
 
 app = FastAPI(title="Agent Infrastructure API")
 
@@ -55,6 +56,11 @@ class EditTaskResponse(BaseModel):
     status: Literal["edited"]
     task: Optional[Task] = None
     context_items: List[ContextItem] = Field(default_factory=list)
+
+
+class PopulateTaskContextRequest(BaseModel):
+    task: Task
+    thread_id: Optional[str] = None
 
 
 class PopulateWorkflowsRequest(BaseModel):
@@ -141,6 +147,26 @@ def edit_task_endpoint(request: EditTaskRequest):
             status="edited",
             task=edited_task,
             context_items=context_items,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/populate_task_context", response_model=Task)
+def populate_task_context_endpoint(
+    request: PopulateTaskContextRequest,
+    x_user_id: Optional[str] = Header(None),
+):
+    """Fill a task's *missing* parameters from user context (memory-unit) before HITL.
+
+    Additive + flag-gated: when ``MEMORY_URL`` is unset (or memory-unit is
+    unreachable) the task is returned unchanged. Only ``missing`` slots are
+    touched — email-provided values are preserved — and resolved values are
+    marked ``guessed`` with a ``source``/``confidence`` so the UI can confirm them.
+    """
+    try:
+        return populate_context_items(
+            request.task, user_id=x_user_id, thread_id=request.thread_id
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
