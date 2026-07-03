@@ -44,6 +44,12 @@ class ContextItem(BaseModel):
     field: str
     status: Literal["present", "missing", "guessed"]
     value: Optional[str] = None
+    # Provenance of `value` once populated, and how much to trust it. Both are
+    # optional + defaulted so existing callers are unaffected and the executor —
+    # whose ContextItem is {field,status,value} and ignores unknown nested fields
+    # — is unchanged. `source` e.g. "email" | "context" | "user"; confidence in [0,1].
+    source: Optional[str] = None
+    confidence: Optional[float] = None
 
 
 class Task(BaseModel):
