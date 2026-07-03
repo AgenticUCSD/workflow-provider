@@ -27,6 +27,15 @@ TemplateSource = Literal["human", "generated"]
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z0-9_]+)\}")
 
 
+def _slot_present(value) -> bool:
+    """A slot counts as bound iff it has a non-empty value.
+
+    The single source of truth shared by ``Step.render`` and
+    ``WorkflowTemplate.missing_slots`` so the two never disagree (e.g. a value of
+    ``0`` must be treated the same by both — present, not missing)."""
+    return value not in (None, "")
+
+
 class Step(BaseModel):
     """A single typed workflow step.
 
@@ -52,7 +61,7 @@ class Step(BaseModel):
         def _sub(m: "re.Match") -> str:
             key = m.group(1)
             value = bound.get(key)
-            return str(value) if value not in (None, "") else m.group(0)
+            return str(value) if _slot_present(value) else m.group(0)
 
         return _PLACEHOLDER_RE.sub(_sub, self.text)
 
@@ -93,11 +102,11 @@ class WorkflowTemplate(BaseModel):
         return "\n".join(lines)
 
     def missing_slots(self, bound: Dict[str, str]) -> List[str]:
-        """Required slot names not satisfied by ``bound``."""
+        """Required slot names not satisfied by ``bound`` (same rule as render)."""
         return [
             s.name
             for s in self.required_slots
-            if s.required and not bound.get(s.name)
+            if s.required and not _slot_present(bound.get(s.name))
         ]
 
     def to_workflow(

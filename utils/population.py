@@ -44,7 +44,9 @@ def populate_context_items(
     suggestion, not ground truth. Returns the same ``task`` (mutated in place).
     """
     items = task.context_items or []
-    missing = [ci for ci in items if ci.status == "missing" or ci.value in (None, "")]
+    # Only fill slots the email left "missing". Values it supplied ("present") and
+    # values already resolved from context ("guessed") are never overwritten.
+    missing = [ci for ci in items if ci.status == "missing"]
     if not missing:
         return task
 

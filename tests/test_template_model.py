@@ -97,6 +97,21 @@ def test_enriched_instance_records_lineage_and_materializes():
     assert inst.to_workflow().steps == ["Invite a@b.com"]
 
 
+def test_render_and_missing_slots_agree():
+    # Regression: render() and missing_slots() must use the same "is bound" rule.
+    t = WorkflowTemplate(
+        name="n", required_slots=[SlotSpec(name="x")], steps=[Step(text="use {x}")]
+    )
+    # Empty string -> missing in both (placeholder preserved).
+    empty = EnrichedInstance.from_template(t, bound_slots={"x": ""})
+    assert empty.missing_slots == ["x"]
+    assert empty.steps == ["use {x}"]
+    # "0" -> present in both (not missing, substituted).
+    zero = EnrichedInstance.from_template(t, bound_slots={"x": "0"})
+    assert zero.missing_slots == []
+    assert zero.steps == ["use 0"]
+
+
 def test_enriched_instance_reports_missing_slots():
     t = WorkflowTemplate(
         name="n",
