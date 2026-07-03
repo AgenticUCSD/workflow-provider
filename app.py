@@ -9,7 +9,7 @@ from agents.search_agent import SearchAgent
 from utils.task import Task, TaskTypes, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
 from utils.chroma import ChromaVectorStore
-from utils.population import populate_context_items
+from utils.population import auto_populate_enabled, populate_context_items
 
 app = FastAPI(title="Agent Infrastructure API")
 
@@ -174,7 +174,10 @@ def populate_task_context_endpoint(
 
 # identify task and then return candidate workflows
 @app.post("/identify_task", response_model=IdentifyTaskResponse)
-def identify_task_endpoint(request: IdentifyTaskRequest):
+def identify_task_endpoint(
+    request: IdentifyTaskRequest,
+    x_user_id: Optional[str] = Header(None),
+):
     try:
         identification = task_identifier_agent.identify_task(
             text=request.text,
@@ -190,10 +193,18 @@ def identify_task_endpoint(request: IdentifyTaskRequest):
                 task=None,
                 context_items=identification.context_items,
             )
+
+        # Optionally fill missing slots from user context before HITL. Off by
+        # default (MEMORY_AUTO_POPULATE); a no-op unless MEMORY_URL is also set.
+        if auto_populate_enabled():
+            task = populate_context_items(
+                task, user_id=x_user_id, thread_id=request.thread_id
+            )
+
         return IdentifyTaskResponse(
             status="identified",
             task=task,
-            context_items=identification.context_items,
+            context_items=task.context_items or identification.context_items,
         )
     except Exception:
         raise HTTPException(status_code=502, detail="Task identification failed")

@@ -7,10 +7,26 @@ overwritten. Everything is best-effort: if memory-unit is disabled or
 unreachable the task is returned unchanged.
 """
 
+import os
 from typing import Optional
 
 from utils.memory_client import resolve_slots
 from utils.task import Task
+
+
+def auto_populate_enabled() -> bool:
+    """Whether to auto-populate slots inside the live identify flow.
+
+    Default OFF and independent of MEMORY_URL: the standalone
+    /populate_task_context endpoint can be used without changing /identify_task's
+    behavior. Opt in by setting MEMORY_AUTO_POPULATE=1/true.
+    """
+    return os.getenv("MEMORY_AUTO_POPULATE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def populate_context_items(

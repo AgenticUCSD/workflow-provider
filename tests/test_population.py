@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import app as app_module
 import utils.memory_client as memory_client
 import utils.population as population
+from agents.task_agent import IdentifyTaskResult
 from utils.task import ContextItem, Objective, Status, Task, TaskTypes
 
 
@@ -130,3 +131,57 @@ def test_populate_endpoint(monkeypatch):
     assert items[0]["value"] == "bob@example.com"
     assert items[0]["status"] == "guessed"
     assert items[0]["source"] == "context"
+
+
+# ── /identify_task auto-population (flag-gated) ────────────────
+
+def _identify_returns(monkeypatch, task):
+    result = IdentifyTaskResult(task=task, context_items=task.context_items)
+    monkeypatch.setattr(
+        app_module.task_identifier_agent, "identify_task", lambda **kw: result
+    )
+
+
+def test_identify_auto_populates_when_enabled(monkeypatch):
+    task = _task_with_items([ContextItem(field="recipient", status="missing")])
+    _identify_returns(monkeypatch, task)
+    monkeypatch.setenv("MEMORY_AUTO_POPULATE", "true")
+    monkeypatch.setattr(
+        population,
+        "resolve_slots",
+        lambda fields, **kw: [
+            {
+                "field": "recipient",
+                "value": "a@b.com",
+                "source": "context",
+                "confidence": 0.7,
+                "status": "present",
+            }
+        ],
+    )
+    client = TestClient(app_module.app)
+
+    resp = client.post("/identify_task", json={"text": "hi"}, headers={"X-User-Id": "u1"})
+    assert resp.status_code == 200, resp.text
+    item = resp.json()["context_items"][0]
+    assert item["value"] == "a@b.com"
+    assert item["status"] == "guessed"
+
+
+def test_identify_does_not_populate_when_disabled(monkeypatch):
+    task = _task_with_items([ContextItem(field="recipient", status="missing")])
+    _identify_returns(monkeypatch, task)
+    monkeypatch.delenv("MEMORY_AUTO_POPULATE", raising=False)
+    calls = {"n": 0}
+
+    def fake(fields, **kw):
+        calls["n"] += 1
+        return []
+
+    monkeypatch.setattr(population, "resolve_slots", fake)
+    client = TestClient(app_module.app)
+
+    resp = client.post("/identify_task", json={"text": "hi"}, headers={"X-User-Id": "u1"})
+    assert resp.status_code == 200, resp.text
+    assert calls["n"] == 0  # memory-unit not consulted when the flag is off
+    assert resp.json()["context_items"][0]["status"] == "missing"
