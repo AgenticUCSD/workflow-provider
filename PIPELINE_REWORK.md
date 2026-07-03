@@ -221,6 +221,18 @@ missing/uncertain slots.
 
 ## Phase 3 — Template → enriched-instance hierarchy + search-before-create ⚠️
 
+> **Implemented this session (additive slice).** Typed templates now exist alongside the flat
+> workflow path (which is untouched): `utils/template.py` (`Step`, `SlotSpec`, versioned
+> `WorkflowTemplate` with `parent_id` lineage + `status`, `EnrichedInstance`) with the contract-safe
+> adapter — `to_workflow()` materializes typed steps to a flat `List[str]` for the executor;
+> `from_workflow()` bridges existing flat workflows in. `utils/template_store.py` adds a versioned,
+> lineage-aware store with content-hash dedup and **score-based threshold search**. Endpoints:
+> `POST /create_template` (threshold search-before-create), `/search_templates`, `/enrich_template`
+> (binds slots → instance + flat workflow, reports missing required slots). Tests: provider 60
+> (offline). **Still open:** persisting created templates as promotable Artifacts through the gate
+> (needs the eval harness), org/role/user specialization beyond `parent_id`, and calibrating the
+> reuse distance threshold (today reuse is opt-in via `max_distance`).
+
 1. **Two levels.** Promote `Workflow` to a versioned **Template** (generic, parameterized by
    `required_slots`, typed `Step`s) and an **EnrichedInstance** (template + bound slots +
    org/role/user specialization). Search matches **templates**; enrichment **binds slots** to produce
