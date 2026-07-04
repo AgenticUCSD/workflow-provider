@@ -4,12 +4,12 @@ from typing import TypeVar
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
-from utils.config import OPENAI_API_KEY
+from utils.config import openai_api_key_or_placeholder
 
 
 model = ChatOpenAI(
     model="gpt-4.1",
-    api_key=OPENAI_API_KEY,
+    api_key=openai_api_key_or_placeholder(),
 )
 
 
