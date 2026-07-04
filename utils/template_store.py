@@ -15,14 +15,14 @@ from typing import Any, Dict, List, Optional
 import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
 
-from utils.config import CHROMA_PERSIST_DIR, OPENAI_API_KEY
+from utils.config import CHROMA_PERSIST_DIR, openai_api_key_or_placeholder
 from utils.template import WorkflowTemplate
 
 
 class TemplateStore:
     def __init__(self):
         openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-            api_key=OPENAI_API_KEY,
+            api_key=openai_api_key_or_placeholder(),
             model_name="text-embedding-ada-002",
         )
         self.client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)

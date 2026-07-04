@@ -7,14 +7,14 @@ import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
 
 from utils.task import Task, Workflow
-from utils.config import CHROMA_PERSIST_DIR, OPENAI_API_KEY
+from utils.config import CHROMA_PERSIST_DIR, openai_api_key_or_placeholder
 
 
 class ChromaVectorStore:
     def __init__(self):
         # There are options for models
         openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-            api_key=OPENAI_API_KEY,
+            api_key=openai_api_key_or_placeholder(),
             model_name="text-embedding-ada-002",
         )
 
