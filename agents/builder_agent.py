@@ -29,7 +29,7 @@ class BuilderAgent:
         # Use provided thread_id or generate a unique one for this task
         if thread_id is None:
             thread_id = str(uuid.uuid4())
-        config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler()]}
+        config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler(thread_id=thread_id)]}
         
         rejected_workflows = [w.model_dump() for w in rejected_workflows] if rejected_workflows else None
 
@@ -67,7 +67,7 @@ class BuilderAgent:
 
             if not thread_id:
                 thread_id = str(uuid.uuid4())
-        config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler()]}
+        config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler(thread_id=thread_id)]}
 
         content = f"Here is the workflow you proposed for the task. Task: {task.model_dump()}\n\n Proposed workflow: {proposed_workflow.model_dump()}\n\nThe user provided the following feedback on how to improve the workflow: {feedback}\n\nEdit the workflow to address the user's feedback. Only return the updated workflow, do not include any explanations."
 

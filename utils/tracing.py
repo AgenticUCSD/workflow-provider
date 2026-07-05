@@ -64,9 +64,18 @@ def traced(name: str) -> Callable:
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if tracing_enabled():
+            if not tracing_enabled():
+                return fn(*args, **kwargs)
+            try:
                 return observed(*args, **kwargs)
-            return fn(*args, **kwargs)
+            except Exception:
+                # Tracing must never break the call. deepeval's span machinery can
+                # raise (e.g. "a span must have a valid trace" when there is no
+                # active parent trace, or a stale trace context left by a prior
+                # LangChain CallbackHandler run). Fall back to the untraced call.
+                # The functions traced here are idempotent reads, so the fallback
+                # is safe even if `observed` failed after invoking `fn`.
+                return fn(*args, **kwargs)
 
         return wrapper
 

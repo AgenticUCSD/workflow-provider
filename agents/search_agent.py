@@ -65,7 +65,7 @@ class SearchAgent:
         # Use provided thread_id or generate a unique one for this task
         if thread_id is None:
             thread_id = str(uuid.uuid4())
-        config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler()]}
+        config = {"configurable": {"thread_id": thread_id}, "callbacks": [CallbackHandler(thread_id=thread_id)]}
         
         candidate_workflows = self.vector_db.query_from_all_workflows_as_objects(task=task, top_k=5)
         if not candidate_workflows:
