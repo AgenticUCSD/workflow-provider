@@ -17,6 +17,7 @@ import chromadb.utils.embedding_functions as embedding_functions
 
 from utils.config import CHROMA_PERSIST_DIR, openai_api_key_or_placeholder
 from utils.template import WorkflowTemplate
+from utils.tracing import traced
 
 
 class TemplateStore:
@@ -118,6 +119,7 @@ class TemplateStore:
         metas = res.get("metadatas") or []
         return [t for t in (self._template_from_metadata(m) for m in metas) if t]
 
+    @traced(name="retrieval.template.search")
     def search_templates(
         self, query_text: str, top_k: int = 5, max_distance: Optional[float] = None
     ) -> List[Dict[str, Any]]:

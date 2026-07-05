@@ -13,10 +13,31 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from utils.tracing import traced
+
 
 def memory_enabled() -> bool:
     """True when a memory-unit base URL is configured."""
     return bool(os.getenv("MEMORY_URL"))
+
+
+@traced(name="retrieval.memory.resolve")
+def _post_resolve(
+    url: str, payload: bytes, headers: Dict[str, str], timeout: float
+) -> List[Dict[str, Any]]:
+    """Do the actual ``/resolve`` POST, traced as a span.
+
+    Keeps the never-raises contract self-contained: always returns a list, never
+    raises, so the span always completes cleanly regardless of network outcome."""
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+        data = json.loads(body)
+        slots = data.get("slots", [])
+        return slots if isinstance(slots, list) else []
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return []
 
 
 def resolve_slots(
@@ -45,12 +66,4 @@ def resolve_slots(
     if thread_id:
         headers["X-Thread-Id"] = thread_id
 
-    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode("utf-8")
-        data = json.loads(body)
-        slots = data.get("slots", [])
-        return slots if isinstance(slots, list) else []
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
-        return []
+    return _post_resolve(url, payload, headers, timeout)

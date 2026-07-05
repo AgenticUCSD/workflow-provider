@@ -8,6 +8,7 @@ import chromadb.utils.embedding_functions as embedding_functions
 
 from utils.task import Task, Workflow
 from utils.config import CHROMA_PERSIST_DIR, openai_api_key_or_placeholder
+from utils.tracing import traced
 
 
 class ChromaVectorStore:
@@ -71,6 +72,7 @@ class ChromaVectorStore:
         )
         return document_id
 
+    @traced(name="retrieval.chroma.query_workflows")
     def query_workflows(self, task: Task, top_k=5, is_generated=True):
         collection = self.generated_workflows if is_generated else self.manual_workflows
         results = collection.query(
@@ -180,6 +182,7 @@ class ChromaVectorStore:
 
         return workflows
 
+    @traced(name="retrieval.chroma.query_all")
     def query_from_all_workflows_as_objects(self, task: Task, top_k=5) -> List[Workflow]:
         manual_results = self.query_workflows(task, top_k=top_k, is_generated=False)
         generated_results = self.query_workflows(task, top_k=top_k, is_generated=True)

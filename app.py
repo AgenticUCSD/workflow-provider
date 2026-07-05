@@ -97,15 +97,23 @@ class SearchWorkflowsRequest(BaseModel):
 
 
 @app.post("/search_workflows", response_model=List[Workflow] | None)
-def search_workflows_endpoint(request: SearchWorkflowsRequest):
+def search_workflows_endpoint(
+    request: SearchWorkflowsRequest,
+    x_thread_id: Optional[str] = Header(None),
+):
+    thread_id = request.thread_id or x_thread_id
     try:
-        return search_agent.query_workflows_for_task(request.task, thread_id=request.thread_id)
+        return search_agent.query_workflows_for_task(request.task, thread_id=thread_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/create_workflow", response_model=Workflow)
-def create_workflow_endpoint(request: CreateWorkflowRequest):
+def create_workflow_endpoint(
+    request: CreateWorkflowRequest,
+    x_thread_id: Optional[str] = Header(None),
+):
+    thread_id = request.thread_id or x_thread_id
     try:
         # Search-before-create: on a fresh create (no rejected workflows and no
         # feedback), reuse an existing strict match instead of generating a near-dup.
@@ -114,7 +122,7 @@ def create_workflow_endpoint(request: CreateWorkflowRequest):
         is_regeneration = bool(request.rejected_workflows) or bool(request.user_feedback)
         if not is_regeneration:
             matches = search_agent.query_workflows_for_task(
-                request.task, thread_id=request.thread_id
+                request.task, thread_id=thread_id
             )
             if matches:  # truthy => a 95%+ match exists (best match first)
                 return matches[0]
@@ -122,7 +130,7 @@ def create_workflow_endpoint(request: CreateWorkflowRequest):
             request.task,
             request.rejected_workflows,
             request.user_feedback,
-            thread_id=request.thread_id
+            thread_id=thread_id
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -174,12 +182,16 @@ class EnrichTemplateResponse(BaseModel):
 
 
 @app.post("/create_template", response_model=WorkflowTemplate)
-def create_template_endpoint(request: CreateTemplateRequest):
+def create_template_endpoint(
+    request: CreateTemplateRequest,
+    x_thread_id: Optional[str] = Header(None),
+):
     """Generate a versioned template for a task (threshold search-before-create).
 
     Reuses the builder to produce steps, then wraps them as a typed template with
     slots inferred from the task. Persists the new template as a `candidate`.
     """
+    thread_id = request.thread_id or x_thread_id
     try:
         is_regeneration = bool(request.user_feedback)
         if not is_regeneration and request.max_distance is not None:
@@ -190,7 +202,7 @@ def create_template_endpoint(request: CreateTemplateRequest):
                 return matches[0]["template"]
 
         workflow = builder_agent.create_workflow_initial(
-            request.task, None, request.user_feedback, thread_id=request.thread_id
+            request.task, None, request.user_feedback, thread_id=thread_id
         )
         template = WorkflowTemplate.from_workflow(workflow, task=request.task)
         template_store.add_template(template)
@@ -234,22 +246,30 @@ def enrich_template_endpoint(request: EnrichTemplateRequest):
 
 
 @app.post("/edit_workflow", response_model=Workflow)
-def edit_workflow_endpoint(request: EditWorkflowRequest):
+def edit_workflow_endpoint(
+    request: EditWorkflowRequest,
+    x_thread_id: Optional[str] = Header(None),
+):
+    thread_id = request.thread_id or x_thread_id
     try:
         return builder_agent.edit_proposed_workflow(
             request.task,
             request.proposed_workflow,
             request.feedback,
-            thread_id=request.thread_id
+            thread_id=thread_id
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/edit_task", response_model=EditTaskResponse)
-def edit_task_endpoint(request: EditTaskRequest):
+def edit_task_endpoint(
+    request: EditTaskRequest,
+    x_thread_id: Optional[str] = Header(None),
+):
+    thread_id = request.thread_id or x_thread_id
     try:
-        edited_task = task_identifier_agent.edit_task(request.task, request.user_feedback, thread_id=request.thread_id)
+        edited_task = task_identifier_agent.edit_task(request.task, request.user_feedback, thread_id=thread_id)
         context_items = edited_task.context_items or []
         return EditTaskResponse(
             status="edited",
@@ -264,6 +284,7 @@ def edit_task_endpoint(request: EditTaskRequest):
 def populate_task_context_endpoint(
     request: PopulateTaskContextRequest,
     x_user_id: Optional[str] = Header(None),
+    x_thread_id: Optional[str] = Header(None),
 ):
     """Fill a task's *missing* parameters from user context (memory-unit) before HITL.
 
@@ -272,9 +293,10 @@ def populate_task_context_endpoint(
     touched — email-provided values are preserved — and resolved values are
     marked ``guessed`` with a ``source``/``confidence`` so the UI can confirm them.
     """
+    thread_id = request.thread_id or x_thread_id
     try:
         return populate_context_items(
-            request.task, user_id=x_user_id, thread_id=request.thread_id
+            request.task, user_id=x_user_id, thread_id=thread_id
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -285,13 +307,15 @@ def populate_task_context_endpoint(
 def identify_task_endpoint(
     request: IdentifyTaskRequest,
     x_user_id: Optional[str] = Header(None),
+    x_thread_id: Optional[str] = Header(None),
 ):
+    thread_id = request.thread_id or x_thread_id
     try:
         identification = task_identifier_agent.identify_task(
             text=request.text,
             subject=request.subject,
             metadata=request.metadata,
-            thread_id=request.thread_id,
+            thread_id=thread_id,
         )
 
         task = identification.task
@@ -306,7 +330,7 @@ def identify_task_endpoint(
         # default (MEMORY_AUTO_POPULATE); a no-op unless MEMORY_URL is also set.
         if auto_populate_enabled():
             task = populate_context_items(
-                task, user_id=x_user_id, thread_id=request.thread_id
+                task, user_id=x_user_id, thread_id=thread_id
             )
 
         return IdentifyTaskResponse(
@@ -323,10 +347,14 @@ class EnrichTaskRequest(BaseModel):
 
 
 @app.post("/enrich_task_with_workflows", response_model=Task)
-def enrich_task_with_workflows_endpoint(request: EnrichTaskRequest):
-    candidates = search_agent.query_workflows_for_task(request.task, thread_id=request.thread_id)
+def enrich_task_with_workflows_endpoint(
+    request: EnrichTaskRequest,
+    x_thread_id: Optional[str] = Header(None),
+):
+    thread_id = request.thread_id or x_thread_id
+    candidates = search_agent.query_workflows_for_task(request.task, thread_id=thread_id)
     if candidates is None:
-        created = builder_agent.create_workflow_initial(request.task, rejected_workflows=None, thread_id=request.thread_id)
+        created = builder_agent.create_workflow_initial(request.task, rejected_workflows=None, thread_id=thread_id)
         candidates = [created]
     request.task.candidate_workflows = candidates
     return request.task
