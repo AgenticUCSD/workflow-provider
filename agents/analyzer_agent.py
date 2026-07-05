@@ -96,7 +96,9 @@ class AnalyzerAgent:
             thread_id = str(uuid.uuid4())
         return {
             "configurable": {"thread_id": thread_id},
-            "callbacks": [CallbackHandler()],
+            # thread_id belongs on the CallbackHandler constructor (deepeval does
+            # not read configurable.thread_id).
+            "callbacks": [CallbackHandler(thread_id=thread_id)],
         }
 
     @staticmethod

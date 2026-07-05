@@ -92,7 +92,10 @@ class TaskIdentifierAgent:
             thread_id = str(uuid.uuid4())
         return {
             "configurable": {"thread_id": thread_id},
-            "callbacks": [CallbackHandler()],
+            # thread_id must be passed to the CallbackHandler *constructor* for
+            # DeepEval to group spans by thread — configurable.thread_id is a
+            # LangGraph concept and is NOT read by deepeval.
+            "callbacks": [CallbackHandler(thread_id=thread_id)],
         }
 
     def preprocess_email(self, text: str, subject: str | None) -> str:
