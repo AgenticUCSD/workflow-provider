@@ -1,9 +1,12 @@
-langchain
-langchain[openai]
-deepagents
-python-dotenv
-requests
-fastapi
-uvicorn
-chromadb
-deepeval
+# Pinned to the current known-good versions for reproducible builds.
+# The Dockerfile builds on python:3.11-slim; Cloud Build's `pip install` step
+# validates these on 3.11 at deploy time. Bump deliberately, not implicitly.
+langchain==1.3.10
+langchain[openai]==1.3.10
+deepagents==0.6.11
+python-dotenv==1.2.2
+requests==2.34.2
+fastapi==0.138.0
+uvicorn==0.49.0
+chromadb==1.5.9
+deepeval==4.0.6
