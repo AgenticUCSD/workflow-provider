@@ -22,8 +22,11 @@ fixed and merged**, and a few forward assumptions **collide with reality**. The 
   `/workflow/execute` accepts `workflow_steps: List[str]` **and now rejects unknown fields**
   (`extra="forbid"`). Resolution: typed Steps stay **internal to the provider** and are **serialized
   back to `List[str]` at the executor boundary** — an adapter, no executor change, live contract safe.
-- **The Artifact envelope does not exist in any repo** (it is designed-only in both rework docs).
-  It is net-new work with **unresolved ownership**, not a foundation to build on. Flagged in Phase 1.
+- **The Artifact envelope does not exist in any repo** (it is designed-only in both rework docs), so
+  it is not a foundation to build on yet. **Ownership is not open, though:** both this plan and the
+  executor's `REWORK.md` assign the envelope + promotion gate + eval harness to the **executor**; we
+  consume/curate, we don't author it. So it's **owned (executor) but un-built** — a cross-team
+  dependency, not our work. Flagged in Phase 1.
 - **Phase 5 (and the promotion gate) is BLOCKED** on the executor's eval harness, which **does not
   exist** (the executor has no test suite / scorers / golden set). Marked cross-team-blocked.
 - **`thread_id` is overloaded** (session key vs. trace key vs. the executor's `task_id`). We define a
@@ -152,10 +155,15 @@ Artifact = { id, kind: task|template|instance|skill|capability|context,
 
 Generated templates and distilled context are **untrusted until promoted** through the one **promotion gate** (safety scan + eval win vs incumbent + HITL/canary → `trusted`, version-pinned). The provider's workflow/skill store **is** the executor's skill/capability store — one store, not two. (An MCP server is just a `capability` Artifact; it does not need a separate silo.)
 
-> ⚠️ **Reality check (net-new, unowned).** The Artifact envelope is **designed-only** — it exists in
-> neither the executor nor the provider code today. It is a shared contract that must be **built and
-> owned before Phase 1 can stand on it** (see Open decisions). Until then, provider content-hash
-> dedup (`_content_hash`, already shipped) is the interim provenance/identity mechanism.
+> ⚠️ **Reality check (owned by the executor, un-built).** The Artifact envelope is **designed-only** —
+> it exists in neither the executor nor the provider code today (the only slice that exists is the
+> executor's `capabilities.trust_tier`, default `'google_official'`, from its Phase 6). Ownership is
+> **not** open: the executor's `REWORK.md` claims the envelope + promotion gate + eval harness; the
+> provider **consumes/curates** artifacts through the shared store but does **not** author the envelope.
+> So it must be **built by the executor before Phase 1 can stand on it**. Until then, provider
+> content-hash dedup (`_content_hash`, already shipped) is the interim provenance/identity mechanism.
+> Any envelope fields we pre-carry (e.g. `status`/`trust_tier` on templates) are **borrowed
+> placeholders that must conform to the executor's spec at cutover** — don't invent divergent semantics.
 
 ---
 
@@ -306,8 +314,8 @@ eval; refinements are attributable to the traces they came from.
 Original linear sequence, **re-annotated for what's done and what's blocked**:
 
 1. ✅ **Phase 0** — unblock (done, merged).
-2. ⚠️ **Phase 1** — shared store + schemas. *Foundation, but gated on ownership + reconciling with the
-   executor's Postgres + the Artifact envelope existing.*
+2. ⚠️ **Phase 1** — shared store + schemas. *Foundation, but gated on reconciling with the executor's
+   Postgres + the Artifact envelope existing (the executor's to build, not ours).*
 3. ⚠️ **Phase 2** — typed slots (unlocks population + conversation-edit). **Unblocked, in-repo.**
 4. ⚠️ **Phase 3** — template/instance + threshold search-before-create, with the executor-boundary
    adapter.
@@ -360,7 +368,9 @@ migration that these can later move onto.
   `task_id` — keep the `thread_id → task_id` mapping explicit.
 
 ## Open decisions (settle before Phase 1)
-- **Who builds/owns the Artifact envelope** (net-new; neither repo has it). Blocks Phase 1's "all are Artifacts."
+- ~~**Who builds/owns the Artifact envelope**~~ **Settled: the executor owns it** (its `REWORK.md`
+  claims the envelope + promotion gate + eval harness). Still un-built, so it remains a **cross-team
+  dependency** that blocks Phase 1's "all are Artifacts" — but not an open decision for us.
 - **Where the shared store lives** and who owns it, **given the executor already runs Postgres.** Recommendation: one Postgres+pgvector, thin shared data-access lib; extend the executor's instance rather than add a second.
 - **Vector DB:** pgvector (transactional with the relational data) vs. a managed vector store. Recommendation: pgvector unless scale forces otherwise.
 - **Param resolution ownership:** memory-unit (recommended — it already holds context) vs. the task-identifier calling raw retrieval.
