@@ -8,18 +8,17 @@ from agents.builder_agent import BuilderAgent
 from agents.search_agent import SearchAgent
 from utils.task import Task, TaskTypes, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
-from utils.chroma import ChromaVectorStore
 from utils.population import auto_populate_enabled, populate_context_items
 from utils.template import EnrichedInstance, WorkflowTemplate
-from utils.template_store import TemplateStore
+from utils.config import make_template_store, make_workflow_store
 
 app = FastAPI(title="Agent Infrastructure API")
 
-chroma_store = ChromaVectorStore()
-builder_agent = BuilderAgent(vector_db=chroma_store)
-search_agent = SearchAgent(vector_db=chroma_store)
+workflow_store = make_workflow_store()
+builder_agent = BuilderAgent(vector_db=workflow_store)
+search_agent = SearchAgent(vector_db=workflow_store)
 task_identifier_agent = TaskIdentifierAgent()
-template_store = TemplateStore()
+template_store = make_template_store()
 
 
 class CreateWorkflowRequest(BaseModel):
@@ -374,7 +373,7 @@ def populate_workflows_endpoint(request: PopulateWorkflowsRequest):
 @app.post("/add_workflow")
 def add_workflow_endpoint(request: AddWorkflowRequest):
     try:
-        chroma_store.add_single_workflow(
+        workflow_store.add_single_workflow(
             request.workflow,
             is_generated=request.is_generated
         )
@@ -386,7 +385,7 @@ def add_workflow_endpoint(request: AddWorkflowRequest):
 @app.get("/workflows", response_model=ListWorkflowsResponse)
 def list_workflows_endpoint():
     try:
-        workflows = chroma_store.get_all_workflows()
+        workflows = workflow_store.get_all_workflows()
         return ListWorkflowsResponse(workflows=workflows)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
