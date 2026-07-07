@@ -10,7 +10,7 @@ from utils.task import Task, TaskTypes, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
 from utils.population import auto_populate_enabled, populate_context_items
 from utils.template import EnrichedInstance, WorkflowTemplate
-from utils.config import make_template_store, make_workflow_store
+from utils.config import make_template_store, make_workflow_store, make_instance_store
 
 app = FastAPI(title="Agent Infrastructure API")
 
@@ -19,6 +19,7 @@ builder_agent = BuilderAgent(vector_db=workflow_store)
 search_agent = SearchAgent(vector_db=workflow_store)
 task_identifier_agent = TaskIdentifierAgent()
 template_store = make_template_store()
+instance_store = make_instance_store()
 
 
 class CreateWorkflowRequest(BaseModel):
@@ -226,7 +227,10 @@ def search_templates_endpoint(request: SearchTemplatesRequest):
 
 
 @app.post("/enrich_template", response_model=EnrichTemplateResponse)
-def enrich_template_endpoint(request: EnrichTemplateRequest):
+def enrich_template_endpoint(
+    request: EnrichTemplateRequest,
+    x_thread_id: Optional[str] = Header(None),
+):
     """Bind slots to a template → an EnrichedInstance + the flat Workflow to run.
 
     Records the exact template_id@version (lineage) and any still-missing required
@@ -241,6 +245,12 @@ def enrich_template_endpoint(request: EnrichTemplateRequest):
         task_id=request.task_id,
         specialization_scope=request.specialization_scope,
     )
+    # Best-effort lineage persistence (no-op unless STORE_BACKEND=pg). A storage
+    # failure must never fail enrichment — mirrors builder_agent._persist_generated.
+    try:
+        instance_store.add_instance(instance, trace_id=x_thread_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[enrich_template] failed to persist instance: {exc}")
     return EnrichTemplateResponse(instance=instance, workflow=instance.to_workflow())
 
 
