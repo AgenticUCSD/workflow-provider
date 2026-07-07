@@ -16,6 +16,7 @@ Connects as the least-privilege ``planner_app`` role via ``PLANNER_DATABASE_URL`
 """
 
 import uuid
+import logging
 from typing import List, Optional
 
 import chromadb.utils.embedding_functions as embedding_functions
@@ -155,7 +156,17 @@ class PGWorkflowStore:
                     (is_generated, qvec, top_k),
                 ).fetchall()
 
-        rows = list(_nearest(False)) + list(_nearest(True))  # manual, then generated
+        # Fail open: a DB error (unreachable/slow/permission) degrades to "no
+        # candidates" → the caller generates a fresh workflow, exactly like a
+        # cold-start Chroma — rather than 500-ing the live request. Logged so a
+        # persistent outage is still visible.
+        try:
+            rows = list(_nearest(False)) + list(_nearest(True))  # manual, then generated
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "pg workflow search failed; degrading to no-candidates: %s", exc
+            )
+            return []
         return self._dedup_by_workflow_id(self._workflow_from_row(r) for r in rows)
 
     def get_all_workflows(self) -> List[Workflow]:
