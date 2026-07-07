@@ -45,6 +45,21 @@ def make_workflow_store():
 
     return ChromaVectorStore()
 
+
+def make_instance_store():
+    """Return the configured enriched-instance store.
+
+    ``STORE_BACKEND=pg`` → the Postgres-backed ``PGInstanceStore`` (persists to
+    planner.enriched_instances); anything else → a no-op store (no persistence, which
+    is today's behavior — there is no pre-existing instance store to fall back to)."""
+    if STORE_BACKEND == "pg":
+        from utils.pg_instance_store import PGInstanceStore
+
+        return PGInstanceStore()
+    from utils.pg_instance_store import NullInstanceStore
+
+    return NullInstanceStore()
+
 # Placeholder used only when OPENAI_API_KEY is unset, so eager client/embedding
 # construction at import time can't crash the container on startup (that took down
 # the Cloud Run service — the container never listened on PORT). Real LLM/embedding
