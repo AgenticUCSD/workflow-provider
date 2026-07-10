@@ -40,16 +40,24 @@ class Workflow(BaseModel):
         return f"Workflow: {self.name}\nDescription: {self.description}\nSteps:\n{steps_str}"
     
 class ContextItem(BaseModel):
-    """A task parameter extracted from the email: present, missing, or guessed."""
+    """A task parameter (slot): its field name, fill status, value, and typed signature.
+
+    Together `{field, type, required, value, status, source, confidence}` is the slot
+    signature (PIPELINE_REWORK Phase 2). All fields beyond `field/status/value` are
+    optional + defaulted, so existing callers are unaffected and the executor — whose
+    `ContextItem` is `extra="ignore"` and reads only `field/status/value` — drops the
+    rest harmlessly. `source` e.g. "email" | "context" | "user"; confidence in [0,1].
+    """
     field: str
     status: Literal["present", "missing", "guessed"]
     value: Optional[str] = None
-    # Provenance of `value` once populated, and how much to trust it. Both are
-    # optional + defaulted so existing callers are unaffected and the executor —
-    # whose ContextItem is {field,status,value} and ignores unknown nested fields
-    # — is unchanged. `source` e.g. "email" | "context" | "user"; confidence in [0,1].
     source: Optional[str] = None
     confidence: Optional[float] = None
+    # Typed signature (provider-internal). `type` is a small vocab
+    # (string|email|date|number|url|ref), inferred deterministically when None.
+    # `required` None means "derive from status" at the template bridge (back-compat).
+    type: Optional[str] = None
+    required: Optional[bool] = None
 
 
 class Task(BaseModel):

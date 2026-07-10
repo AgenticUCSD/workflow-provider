@@ -151,8 +151,19 @@ class WorkflowTemplate(BaseModel):
         """
         slots = required_slots
         if slots is None and task is not None and task.context_items:
+            # Carry the typed signature through: honor an explicit `type`/`required`
+            # on the slot, falling back to defaults (string / derive-from-status) so
+            # untyped ContextItems behave exactly as before.
             slots = [
-                SlotSpec(name=ci.field, required=(ci.status != "present"))
+                SlotSpec(
+                    name=ci.field,
+                    type=(ci.type or "string"),
+                    required=(
+                        ci.required
+                        if ci.required is not None
+                        else (ci.status != "present")
+                    ),
+                )
                 for ci in task.context_items
             ]
         return cls(
