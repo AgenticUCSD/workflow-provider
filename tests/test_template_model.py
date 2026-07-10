@@ -66,6 +66,23 @@ def test_from_workflow_bridges_and_infers_slots_from_task():
     assert t.status == "draft"
 
 
+def test_from_workflow_honors_explicit_slot_signature():
+    # An explicit type/required on the ContextItem flows into the SlotSpec,
+    # overriding the status-derived defaults.
+    task = _task(
+        [
+            ContextItem(field="cc", status="present", value="a@b.com", type="email", required=True),
+        ]
+    )
+    wf = Workflow(workflow_id="w1", name="n", description="d", steps=["a"])
+    t = WorkflowTemplate.from_workflow(wf, task=task)
+    spec = t.required_slots[0]
+    assert spec.name == "cc"
+    assert spec.type == "email"
+    # Explicit required=True wins even though status is "present" (would derive False).
+    assert spec.required is True
+
+
 def test_missing_slots():
     t = WorkflowTemplate(
         name="n",

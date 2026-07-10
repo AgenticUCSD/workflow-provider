@@ -219,6 +219,48 @@ class IdentifyEndpointTests(unittest.TestCase):
         self.assertEqual(body["context_items"][0]["status"], "missing")
         self.assertIsNone(body["task"]["candidate_workflows"])
 
+    def test_identify_normalizes_slot_types(self) -> None:
+        # Slots come back with an inferred `type` (value shape, then field hint).
+        task = build_task(TaskTypes.SCHEDULE)
+        items = [
+            ContextItem(field="participants", status="present", value="alice@example.com"),
+            ContextItem(field="duration", status="missing"),
+        ]
+        task.context_items = items
+        mock_result = type('MockResult', (), {})()
+        mock_result.task = task
+        mock_result.context_items = items
+
+        with (
+            patch.object(app_module.task_identifier_agent, "preprocess_email", return_value="Schedule"),
+            patch.object(
+                app_module.task_identifier_agent, "identify_task", return_value=mock_result
+            ),
+        ):
+            response = self.client.post(IDENTIFY_PATH, json={"text": "schedule a 30 min sync"})
+        self.assertEqual(response.status_code, 200, response.text)
+        by = {c["field"]: c for c in response.json()["context_items"]}
+        self.assertEqual(by["participants"]["type"], "email")  # value shape wins
+        self.assertEqual(by["duration"]["type"], "number")     # field-name hint
+
+    def test_edit_task_normalizes_slot_types(self) -> None:
+        edited = build_task(TaskTypes.SCHEDULE)
+        edited.context_items = [
+            ContextItem(field="recipient", status="present", value="bob@x.com")
+        ]
+        with patch.object(
+            app_module.task_identifier_agent, "edit_task", return_value=edited
+        ):
+            payload = {
+                "task": build_task(TaskTypes.SCHEDULE).model_dump(mode="json"),
+                "user_feedback": "set the recipient",
+            }
+            response = self.client.post(EDIT_TASK_PATH, json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        items = response.json()["context_items"]
+        self.assertEqual(items[0]["field"], "recipient")
+        self.assertEqual(items[0]["type"], "email")
+
     def test_enrich_task_search_hit_populates_candidate_workflows(self) -> None:
         task = build_task(TaskTypes.REVIEW)
         workflows = [build_workflow("w-hit")]
