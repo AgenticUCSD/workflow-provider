@@ -189,7 +189,8 @@ def create_template_endpoint(
     """Generate a versioned template for a task (threshold search-before-create).
 
     Reuses the builder to produce steps, then wraps them as a typed template with
-    slots inferred from the task. Persists the new template as a `candidate`.
+    slots inferred from the task. Persists the new template as a `draft` (the
+    Artifact-envelope initial state; promoted to candidate/trusted via the gate).
     """
     thread_id = request.thread_id or x_thread_id
     try:

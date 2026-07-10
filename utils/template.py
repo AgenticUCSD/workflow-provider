@@ -75,7 +75,16 @@ class SlotSpec(BaseModel):
 
 
 class WorkflowTemplate(BaseModel):
-    """A generic, versioned, parameterized workflow (Artifact kind=template)."""
+    """A generic, versioned, parameterized workflow (Artifact ``kind=template``).
+
+    Envelope fields conform to the executor's canonical ``artifacts`` table
+    (``workflow_executor/services/status_store.py``), the shared source of truth:
+    a freshly created/generated template is a **draft** (``trust_tier`` T0) and is
+    only promoted ``draft → candidate (T1) → trusted`` through the executor's
+    eval gate. ``template_id`` maps to the envelope's ``artifact_id`` and
+    ``parent_id`` to ``parent_artifact_id``. ``source`` here is provider-local
+    provenance; the envelope's provenance is ``source_trace_ids`` (trace lineage).
+    """
 
     template_id: str = Field(default_factory=lambda: f"tmpl_{uuid.uuid4().hex[:8]}")
     name: str
@@ -86,7 +95,7 @@ class WorkflowTemplate(BaseModel):
     tags: List[str] = Field(default_factory=list)
     parent_id: Optional[str] = None  # lineage: specialization of another template
     source: TemplateSource = "generated"
-    status: TemplateStatus = "candidate"
+    status: TemplateStatus = "draft"  # envelope initial state; promoted via the gate
 
     def to_string(self) -> str:
         """Stable content representation (for embedding + content-hash dedup).
@@ -132,7 +141,7 @@ class WorkflowTemplate(BaseModel):
         task: Optional[Task] = None,
         required_slots: Optional[List[SlotSpec]] = None,
         source: TemplateSource = "generated",
-        status: TemplateStatus = "candidate",
+        status: TemplateStatus = "draft",
     ) -> "WorkflowTemplate":
         """Bridge a flat ``Workflow`` into a template (no LLM).
 

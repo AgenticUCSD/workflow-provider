@@ -9,6 +9,16 @@
 
 ## Status & corrections (revised 2026-07-01)
 
+> **UPDATE 2026-07-09 — the executor's Phase 6/7 shipped.** The Artifact envelope (a real
+> `public.artifacts` table), the eval harness (`workflow_executor/evals/` — golden set + scorers +
+> replay), the **promotion gate**, and a self-improvement loop now **exist in executor code** and are
+> live in the shared Cloud SQL. This **retires the "un-built / does not exist / BLOCKED" caveats
+> below** (Phase 5, the Reality-check block, the Open decision): those dependencies are now satisfied.
+> Phase 5 step 3 and template promotion are **dependency-unblocked** — the remaining work is cross-repo
+> integration (writing/promoting candidates through the executor's gate), not a missing gate. We
+> reconciled our borrowed template envelope fields (`status` default → `draft`, `trust_tier` → `T0`
+> vocab) to it. Canonical contract: the `executor-artifact-envelope` memory + `claude-context/phase1.md`.
+
 This is a **revision** of the original plan, re-grounded against the code as it actually stands
 today. The **design is unchanged** — same six goals, same phases, same guarantees, same target
 architecture. What changed is accuracy: several bugs the original plan set out to fix are **already
@@ -155,15 +165,14 @@ Artifact = { id, kind: task|template|instance|skill|capability|context,
 
 Generated templates and distilled context are **untrusted until promoted** through the one **promotion gate** (safety scan + eval win vs incumbent + HITL/canary → `trusted`, version-pinned). The provider's workflow/skill store **is** the executor's skill/capability store — one store, not two. (An MCP server is just a `capability` Artifact; it does not need a separate silo.)
 
-> ⚠️ **Reality check (owned by the executor, un-built).** The Artifact envelope is **designed-only** —
-> it exists in neither the executor nor the provider code today (the only slice that exists is the
-> executor's `capabilities.trust_tier`, default `'google_official'`, from its Phase 6). Ownership is
-> **not** open: the executor's `REWORK.md` claims the envelope + promotion gate + eval harness; the
-> provider **consumes/curates** artifacts through the shared store but does **not** author the envelope.
-> So it must be **built by the executor before Phase 1 can stand on it**. Until then, provider
-> content-hash dedup (`_content_hash`, already shipped) is the interim provenance/identity mechanism.
-> Any envelope fields we pre-carry (e.g. `status`/`trust_tier` on templates) are **borrowed
-> placeholders that must conform to the executor's spec at cutover** — don't invent divergent semantics.
+> ✅ **Reality check (owned by the executor — now BUILT, 2026-07-09).** The Artifact envelope is a real
+> `public.artifacts` table (`workflow_executor/services/status_store.py`), live in the shared Cloud SQL:
+> `artifact_id, kind, name, content, status (draft→candidate→trusted), trust_tier (T0→T1→…), version,
+> content_hash, source_trace_ids, parent_artifact_id, user_id`. `'google_official'` is the separate
+> `capabilities`/MCP table, NOT the artifact trust vocab. Ownership is the executor's; the provider
+> **consumes/curates**. We **conformed** our borrowed template placeholders to it (`status` default →
+> `draft`, `trust_tier` → `T0`). Provider content-hash dedup (`_content_hash`) remains our interim
+> identity mechanism until templates are actually written as artifacts (a separate convergence step).
 
 ---
 
@@ -287,7 +296,7 @@ Turn the durable-but-orphaned retriever into the pipeline's context brain. **Wit
 **Acceptance:** the task-identifier fills slots from `resolve()`; a value confirmed via HITL on one
 task is available (as context) on the next; memory-unit is on the critical path.
 
-## Phase 5 — One trace, one refinement loop 🚫 BLOCKED (needs the executor's eval harness)
+## Phase 5 — One trace, one refinement loop ⚠️ (steps 1-2 done; step 3 dependency-unblocked 2026-07-09)
 
 1. **One pipeline = one trace.** Thread a single `thread_id` through identify → populate → search →
    enrich → execute → resume; add **retrieval** tracing (provider traces LLM calls only) and add
