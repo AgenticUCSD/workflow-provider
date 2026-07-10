@@ -63,7 +63,7 @@ def test_from_workflow_bridges_and_infers_slots_from_task():
     slots = {s.name: s.required for s in t.required_slots}
     # A value the email already supplied ("present") is not a required slot.
     assert slots == {"recipient": True, "topic": False}
-    assert t.status == "candidate"
+    assert t.status == "draft"
 
 
 def test_missing_slots():

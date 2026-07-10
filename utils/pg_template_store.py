@@ -99,7 +99,7 @@ class PGTemplateStore:
             tags=list(row.get("tags") or []),
             parent_id=(row.get("parent_id") or None),
             source=row.get("source") or "generated",
-            status=row.get("status") or "candidate",
+            status=row.get("status") or "draft",  # envelope default (conforms to executor artifacts)
         )
 
     # ---- public interface (mirrors TemplateStore) -------------------------
