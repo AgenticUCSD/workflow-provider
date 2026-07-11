@@ -9,7 +9,7 @@ import os
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
 from utils.task import ContextItem, Objective, Status, Task, TaskTypes, Workflow
-from utils.template import EnrichedInstance, SlotSpec, Step, WorkflowTemplate
+from utils.template import EnrichedInstance, SlotSpec, Step, WorkflowTemplate, scope_rank
 
 
 def _task(context_items=None) -> Task:
@@ -64,6 +64,33 @@ def test_from_workflow_bridges_and_infers_slots_from_task():
     # A value the email already supplied ("present") is not a required slot.
     assert slots == {"recipient": True, "topic": False}
     assert t.status == "draft"
+
+
+def test_from_workflow_default_scope_is_global():
+    wf = Workflow(workflow_id="w1", name="n", description="d", steps=["a"])
+    assert WorkflowTemplate.from_workflow(wf).scope == "global"
+
+
+def test_from_workflow_honors_explicit_scope():
+    wf = Workflow(workflow_id="w1", name="n", description="d", steps=["a"])
+    assert WorkflowTemplate.from_workflow(wf, scope="user:U1").scope == "user:U1"
+
+
+def test_scope_stays_out_of_content_hash():
+    # Two templates differing ONLY in scope must serialize identically for dedup
+    # (scope is a ranking attribute, not identity).
+    a = WorkflowTemplate(name="n", steps=[Step(text="x")], scope="global")
+    b = WorkflowTemplate(name="n", steps=[Step(text="x")], scope="user:U1")
+    assert a.to_string() == b.to_string()
+
+
+def test_scope_rank_orders_by_preference():
+    prefs = ["user:U1", "role:R", "global"]
+    assert scope_rank("user:U1", prefs) == 0
+    assert scope_rank("role:R", prefs) == 1
+    assert scope_rank("global", prefs) == 2
+    assert scope_rank("org:O", prefs) == 3   # unlisted -> last (fallback)
+    assert scope_rank(None, prefs) == 3
 
 
 def test_from_workflow_honors_explicit_slot_signature():

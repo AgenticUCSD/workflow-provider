@@ -40,8 +40,9 @@ class FakeCollection:
         # Return stored items in insertion order with synthetic increasing
         # distances so max_distance filtering is deterministic.
         metas = self.metadatas[:n_results]
+        ids = self.ids[:n_results]
         dists = [round(0.2 * i, 3) for i in range(len(metas))]
-        return {"metadatas": [metas], "distances": [dists]}
+        return {"ids": [ids], "metadatas": [metas], "distances": [dists]}
 
 
 def make_store():
@@ -50,13 +51,14 @@ def make_store():
     return store
 
 
-def _tmpl(template_id=None, name="Sched", steps=("Find time", "Invite"), version=1, parent_id=None):
+def _tmpl(template_id=None, name="Sched", steps=("Find time", "Invite"), version=1, parent_id=None, scope="global"):
     kwargs = dict(
         name=name,
         description="d",
         version=version,
         steps=[Step(text=s) for s in steps],
         parent_id=parent_id,
+        scope=scope,
     )
     if template_id:
         kwargs["template_id"] = template_id
@@ -111,6 +113,61 @@ def test_threshold_search_filters_by_distance():
     assert len(matches) == 2
     assert matches[0]["distance"] <= matches[1]["distance"]
     assert matches[0]["score"] >= matches[1]["score"]  # score monotonic with proximity
+
+
+def test_semantic_dedup_off_by_default(monkeypatch):
+    monkeypatch.delenv("TEMPLATE_NEAR_DUP_DISTANCE", raising=False)
+    store = make_store()
+    store.add_template(_tmpl(name="alpha"))
+    store.add_template(_tmpl(name="beta"))  # distinct content, no semantic collapse
+    assert store.templates.add_calls == 2
+
+
+def test_semantic_dedup_skips_near_duplicate(monkeypatch):
+    monkeypatch.setenv("TEMPLATE_NEAR_DUP_DISTANCE", "0.15")
+    store = make_store()
+    id1 = store.add_template(_tmpl(template_id="a", name="alpha"))
+    # Different exact content, but the fake reports the nearest at distance 0.0
+    # (<= 0.15) -> treated as a near-dup and skipped, returning the existing id.
+    id2 = store.add_template(_tmpl(template_id="b", name="beta"))
+    assert store.templates.add_calls == 1
+    assert id2 == id1
+
+
+def test_search_scope_prefers_more_specific_even_if_farther():
+    store = make_store()
+    # Insertion order sets synthetic distances: "one" @0.0 (global), "two" @0.2 (user).
+    store.add_template(_tmpl(name="one", scope="global"))
+    store.add_template(_tmpl(name="two", scope="user:U1"))
+
+    # No scope preference -> pure proximity: the global one (closest) wins.
+    plain = store.search_templates("q", top_k=2)
+    assert plain[0]["template"].scope == "global"
+
+    # With a scope preference, the user-scoped template wins despite being farther.
+    scoped = store.search_templates("q", top_k=2, scope=["user:U1", "global"])
+    assert scoped[0]["template"].scope == "user:U1"
+    assert scoped[1]["template"].scope == "global"
+
+
+def test_search_unscoped_still_returned_as_fallback():
+    store = make_store()
+    store.add_template(_tmpl(name="one", scope="global"))
+    # Preference names a scope the corpus lacks -> global still returned (ranks last).
+    out = store.search_templates("q", top_k=2, scope=["user:U9"])
+    assert len(out) == 1
+    assert out[0]["template"].scope == "global"
+
+
+def test_search_scope_truncates_to_top_k():
+    store = make_store()
+    store.add_template(_tmpl(name="one", scope="global"))
+    store.add_template(_tmpl(name="two", scope="global"))
+    store.add_template(_tmpl(name="three", scope="user:U1"))
+    # Widened fetch considers all 3, but only top_k results are returned.
+    out = store.search_templates("q", top_k=1, scope=["user:U1", "global"])
+    assert len(out) == 1
+    assert out[0]["template"].scope == "user:U1"  # most-specific wins the single slot
 
 
 def test_get_template_missing_returns_none():

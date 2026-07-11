@@ -20,8 +20,12 @@ from typing import Any, Dict, List, Optional
 
 import chromadb.utils.embedding_functions as embedding_functions
 
-from utils.config import PLANNER_DATABASE_URL, openai_api_key_or_placeholder
-from utils.template import SlotSpec, Step, WorkflowTemplate
+from utils.config import (
+    PLANNER_DATABASE_URL,
+    openai_api_key_or_placeholder,
+    template_near_dup_distance,
+)
+from utils.template import SlotSpec, Step, WorkflowTemplate, scope_rank
 from utils.template_store import TemplateStore
 from utils.tracing import traced
 
@@ -29,7 +33,7 @@ _TABLE = "planner.workflow_templates"
 # Columns needed to reconstruct a WorkflowTemplate (excludes the heavy embedding).
 _COLS = (
     "template_id, version, name, description, required_slots, steps, "
-    "tags, parent_id, status, source"
+    "tags, parent_id, status, source, scope"
 )
 
 
@@ -100,6 +104,7 @@ class PGTemplateStore:
             parent_id=(row.get("parent_id") or None),
             source=row.get("source") or "generated",
             status=row.get("status") or "draft",  # envelope default (conforms to executor artifacts)
+            scope=row.get("scope") or "global",
         )
 
     # ---- public interface (mirrors TemplateStore) -------------------------
@@ -112,9 +117,39 @@ class PGTemplateStore:
             ).fetchone()
         return int(row["v"]) if row and row["v"] is not None else 1
 
+    def _near_duplicate_id(self, embedding: str) -> Optional[str]:
+        """``"template_id:version"`` of an existing near-identical template, or None.
+
+        Off unless ``TEMPLATE_NEAR_DUP_DISTANCE`` is set: compares the candidate's
+        ``embedding`` (a ``::vector`` literal) to the single nearest stored template;
+        a cosine distance ≤ threshold counts as a near-dup. Best-effort — any error
+        yields None so the insert proceeds."""
+        threshold = template_near_dup_distance()
+        if threshold is None:
+            return None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    f"""
+                    SELECT template_id, version, (embedding <=> %s::vector) AS distance
+                    FROM {_TABLE}
+                    WHERE embedding IS NOT NULL
+                    ORDER BY distance
+                    LIMIT 1
+                    """,
+                    (embedding,),
+                ).fetchone()
+            if row and row["distance"] is not None and float(row["distance"]) <= threshold:
+                return f"{row['template_id']}:{row['version']}"
+        except Exception:
+            return None
+        return None
+
     def add_template(self, template: WorkflowTemplate, dedup: bool = True) -> str:
-        """Persist a template. On an exact content-hash match (when ``dedup``) skip the
-        insert and return the existing ``template_id:version`` id."""
+        """Persist a template. When ``dedup``: an exact content-hash match is skipped
+        (returns the existing ``template_id:version``); and if
+        ``TEMPLATE_NEAR_DUP_DISTANCE`` is set, a semantically near-identical template
+        (cosine distance ≤ threshold) is also skipped."""
         content_hash = self._content_hash(template)
 
         if dedup:
@@ -128,6 +163,12 @@ class PGTemplateStore:
                 return f"{row['template_id']}:{row['version']}"
 
         embedding = _vector_literal(self._embed(template.to_string()))
+
+        if dedup and embedding is not None:
+            near = self._near_duplicate_id(embedding)
+            if near is not None:
+                return near
+
         required_slots = [s.model_dump() for s in template.required_slots]
         steps = [s.model_dump() for s in template.steps]
         version = int(template.version)
@@ -137,8 +178,8 @@ class PGTemplateStore:
                 f"""
                 INSERT INTO {_TABLE}
                     (template_id, version, name, description, required_slots, steps,
-                     tags, parent_id, content_hash, embedding, status, source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s, %s)
+                     tags, parent_id, content_hash, embedding, status, source, scope)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s, %s, %s)
                 ON CONFLICT (template_id, version) DO UPDATE SET
                     name = EXCLUDED.name,
                     description = EXCLUDED.description,
@@ -149,7 +190,8 @@ class PGTemplateStore:
                     content_hash = EXCLUDED.content_hash,
                     embedding = EXCLUDED.embedding,
                     status = EXCLUDED.status,
-                    source = EXCLUDED.source
+                    source = EXCLUDED.source,
+                    scope = EXCLUDED.scope
                 """,
                 (
                     template.template_id,
@@ -164,6 +206,7 @@ class PGTemplateStore:
                     embedding,
                     template.status,
                     template.source,
+                    template.scope,
                 ),
             )
         return f"{template.template_id}:{version}"
@@ -211,14 +254,27 @@ class PGTemplateStore:
 
     @traced(name="retrieval.template.search")
     def search_templates(
-        self, query_text: str, top_k: int = 5, max_distance: Optional[float] = None
+        self,
+        query_text: str,
+        top_k: int = 5,
+        max_distance: Optional[float] = None,
+        scope: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Semantic search returning ``[{template, distance, score}]`` sorted by
-        proximity (cosine). ``score = 1/(1+distance)`` is monotonic; when
-        ``max_distance`` is given, farther matches are dropped."""
+        """Semantic search returning ``[{template, distance, score}]``. ``score =
+        1/(1+distance)`` is monotonic; when ``max_distance`` is given, farther
+        matches are dropped.
+
+        ``scope`` is an ordered preference list (most-specific first). When given,
+        results are ranked by scope specificity **first**, then proximity — a
+        more-specific-scoped template can win over a closer-but-less-specific one
+        (mirrors memory-unit's ``resolve``); unscoped/unlisted templates rank last
+        but are never dropped. When None, ranking is purely proximity (unchanged)."""
         qvec = _vector_literal(self._embed(query_text))
         if qvec is None:
             return []
+        # Widen the SQL candidate set when scoping so a farther but more-specific
+        # template can surface; scope re-ranking happens Python-side after fetch.
+        limit = top_k * 3 if scope else top_k
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
@@ -228,7 +284,7 @@ class PGTemplateStore:
                 ORDER BY distance
                 LIMIT %s
                 """,
-                (qvec, top_k),
+                (qvec, limit),
             ).fetchall()
 
         out: List[Dict[str, Any]] = []
@@ -243,4 +299,7 @@ class PGTemplateStore:
                     "score": round(1.0 / (1.0 + distance), 3),
                 }
             )
+        if scope:
+            out.sort(key=lambda r: (scope_rank(r["template"].scope, scope), r["distance"]))
+            out = out[:top_k]
         return out
