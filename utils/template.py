@@ -27,6 +27,20 @@ TemplateSource = Literal["human", "generated"]
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z0-9_]+)\}")
 
 
+def scope_rank(meta_scope: Optional[str], scope_prefs: List[str]) -> int:
+    """Preference rank of a template's ``scope`` given an ordered preference list.
+
+    Lower = more preferred. Scopes listed earlier (more specific) rank lower; a
+    scope not in the list (including an unscoped/``global`` template) ranks last
+    but is still allowed as a fallback — never excluded. A verbatim port of
+    memory-unit's ``MemoryUnit._scope_rank`` so both services rank scope the same
+    way. ``scope_prefs`` is most-specific-first, e.g. ``["user:U1", "role:R", "org:O", "global"]``.
+    """
+    if meta_scope in scope_prefs:
+        return scope_prefs.index(meta_scope)
+    return len(scope_prefs)
+
+
 def _slot_present(value) -> bool:
     """A slot counts as bound iff it has a non-empty value.
 
@@ -96,6 +110,12 @@ class WorkflowTemplate(BaseModel):
     parent_id: Optional[str] = None  # lineage: specialization of another template
     source: TemplateSource = "generated"
     status: TemplateStatus = "draft"  # envelope initial state; promoted via the gate
+    # Retrieval-preference scope (maps to planner.workflow_templates.scope). Free-form
+    # to match the DDL `text` + memory-unit's scope labels: a bare level
+    # ("global"|"org"|"role"|"user") or an owner-qualified label ("user:<id>"). Search
+    # prefers a more-specific scope (see scope_rank). Deliberately NOT part of to_string()
+    # / the content hash — scope is a ranking attribute, not identity.
+    scope: str = "global"
 
     def to_string(self) -> str:
         """Stable content representation (for embedding + content-hash dedup).
@@ -142,6 +162,7 @@ class WorkflowTemplate(BaseModel):
         required_slots: Optional[List[SlotSpec]] = None,
         source: TemplateSource = "generated",
         status: TemplateStatus = "draft",
+        scope: str = "global",
     ) -> "WorkflowTemplate":
         """Bridge a flat ``Workflow`` into a template (no LLM).
 
@@ -173,6 +194,7 @@ class WorkflowTemplate(BaseModel):
             steps=[Step(kind="llm", text=s) for s in workflow.steps],
             source=source,
             status=status,
+            scope=scope,
         )
 
 

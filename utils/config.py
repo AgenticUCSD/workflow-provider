@@ -15,6 +15,24 @@ STORE_BACKEND = os.getenv("STORE_BACKEND", "chroma").strip().lower()
 PLANNER_DATABASE_URL = os.getenv("PLANNER_DATABASE_URL", "")
 
 
+def template_near_dup_distance():
+    """Optional cosine-distance threshold for *semantic* near-dup template dedup.
+
+    Read at call time so it's easy to toggle/test. Unset or unparseable → ``None``
+    = OFF (exact content-hash dedup only, i.e. today's behavior). Set
+    ``TEMPLATE_NEAR_DUP_DISTANCE`` to a small value (e.g. ``0.02``) to also collapse
+    near-identical templates on create. Default OFF because the right threshold
+    needs calibration on real data — a too-large value would wrongly merge distinct
+    templates."""
+    raw = os.getenv("TEMPLATE_NEAR_DUP_DISTANCE", "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 def make_template_store():
     """Return the configured template store.
 

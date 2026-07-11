@@ -15,8 +15,12 @@ from typing import Any, Dict, List, Optional
 import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
 
-from utils.config import CHROMA_PERSIST_DIR, openai_api_key_or_placeholder
-from utils.template import WorkflowTemplate
+from utils.config import (
+    CHROMA_PERSIST_DIR,
+    openai_api_key_or_placeholder,
+    template_near_dup_distance,
+)
+from utils.template import WorkflowTemplate, scope_rank
 from utils.tracing import traced
 
 
@@ -45,8 +49,10 @@ class TemplateStore:
         return (max(versions) + 1) if versions else 1
 
     def add_template(self, template: WorkflowTemplate, dedup: bool = True) -> str:
-        """Persist a template. On an exact content-hash match (when ``dedup``) skip
-        the insert and return the existing document id."""
+        """Persist a template. When ``dedup``: an exact content-hash match is skipped
+        (returns the existing id); and if ``TEMPLATE_NEAR_DUP_DISTANCE`` is set, a
+        semantically near-identical template (cosine distance ≤ threshold) is also
+        skipped. Returns the existing document id on any dedup hit."""
         content_hash = self._content_hash(template)
 
         if dedup:
@@ -54,6 +60,10 @@ class TemplateStore:
             existing_ids = existing.get("ids") if isinstance(existing, dict) else None
             if existing_ids:
                 return existing_ids[0]
+
+            near_id = self._near_duplicate_id(template)
+            if near_id is not None:
+                return near_id
 
         document_id = str(uuid.uuid4())
         self.templates.add(
@@ -74,6 +84,26 @@ class TemplateStore:
             ],
         )
         return document_id
+
+    def _near_duplicate_id(self, template: WorkflowTemplate) -> Optional[str]:
+        """The id of an existing semantically near-identical template, or None.
+
+        Off unless ``TEMPLATE_NEAR_DUP_DISTANCE`` is set: embeds the candidate and
+        checks the single nearest existing template; a cosine distance ≤ threshold
+        counts as a near-dup. Best-effort — any query error yields None (insert
+        proceeds), never raising into the create path."""
+        threshold = template_near_dup_distance()
+        if threshold is None:
+            return None
+        try:
+            res = self.templates.query(query_texts=[template.to_string()], n_results=1)
+            ids = (res.get("ids") or [[]])[0]
+            dists = (res.get("distances") or [[]])[0]
+            if ids and dists and dists[0] is not None and float(dists[0]) <= threshold:
+                return ids[0]
+        except Exception:
+            return None
+        return None
 
     def add_new_version(self, template: WorkflowTemplate) -> str:
         """Persist ``template`` as the next version of its lineage (bumps version)."""
@@ -121,12 +151,27 @@ class TemplateStore:
 
     @traced(name="retrieval.template.search")
     def search_templates(
-        self, query_text: str, top_k: int = 5, max_distance: Optional[float] = None
+        self,
+        query_text: str,
+        top_k: int = 5,
+        max_distance: Optional[float] = None,
+        scope: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Semantic search returning ``[{template, distance, score}]`` sorted by
-        proximity. ``score = 1/(1+distance)`` is monotonic (higher = closer); when
-        ``max_distance`` is given, farther matches are dropped."""
-        results = self.templates.query(query_texts=[query_text], n_results=top_k)
+        """Semantic search returning ``[{template, distance, score}]``. ``score =
+        1/(1+distance)`` is monotonic (higher = closer); when ``max_distance`` is
+        given, farther matches are dropped.
+
+        ``scope`` is an ordered preference list (most-specific first, e.g.
+        ``["user:U1", "role:R", "global"]``). When given, results are ranked by
+        scope specificity **first**, then proximity — so a more-specific-scoped
+        template can win over a closer-but-less-specific one (mirrors memory-unit's
+        ``resolve``). Unscoped/unlisted templates rank last but are never dropped.
+        When ``scope`` is None, ranking is purely by proximity (unchanged).
+        """
+        # Widen the candidate set when a scope preference is active so a farther but
+        # more-specific template can surface (parallels memory-unit's wider fetch).
+        n_results = top_k * 3 if scope else top_k
+        results = self.templates.query(query_texts=[query_text], n_results=n_results)
         metas = (results.get("metadatas") or [[]])[0]
         dists = (results.get("distances") or [[]])[0]
 
@@ -145,5 +190,9 @@ class TemplateStore:
                     "score": round(1.0 / (1.0 + distance), 3),
                 }
             )
-        out.sort(key=lambda r: r["distance"])
+        if scope:
+            out.sort(key=lambda r: (scope_rank(r["template"].scope, scope), r["distance"]))
+            out = out[:top_k]
+        else:
+            out.sort(key=lambda r: r["distance"])
         return out

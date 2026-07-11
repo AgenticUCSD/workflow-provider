@@ -56,13 +56,14 @@ def _fake_embed(text: str):
     return _vec(1.0, 0.0)
 
 
-def _tmpl(template_id=None, name="Sched", steps=("Find time", "Invite"), version=1, parent_id=None):
+def _tmpl(template_id=None, name="Sched", steps=("Find time", "Invite"), version=1, parent_id=None, scope="global"):
     kwargs = dict(
         name=name,
         description="d",
         version=version,
         steps=[Step(text=s) for s in steps],
         parent_id=parent_id,
+        scope=scope,
     )
     if template_id:
         kwargs["template_id"] = template_id
@@ -149,6 +150,56 @@ def test_threshold_search_filters_by_distance(store):
     assert len(matches) == 2
     assert matches[0]["distance"] <= matches[1]["distance"]
     assert matches[0]["score"] >= matches[1]["score"]  # score monotonic with proximity
+
+
+def test_scope_roundtrips_through_pg(store):
+    store.add_template(_tmpl(template_id="s1", name="scoped", scope="user:U1"))
+    assert store.get_template("s1").scope == "user:U1"
+    # Default scope persists too.
+    store.add_template(_tmpl(template_id="s2", name="plain"))
+    assert store.get_template("s2").scope == "global"
+
+
+def test_search_scope_prefers_more_specific_even_if_farther(store):
+    # Against query "one": "one"→dist 0 (global), "two"→~0.2 (user-scoped).
+    store.add_template(_tmpl(template_id="g", name="one", scope="global"))
+    store.add_template(_tmpl(template_id="u", name="two", scope="user:U1"))
+
+    plain = store.search_templates("one", top_k=2)
+    assert plain[0]["template"].scope == "global"  # closest wins without a preference
+
+    scoped = store.search_templates("one", top_k=2, scope=["user:U1", "global"])
+    assert scoped[0]["template"].scope == "user:U1"  # specificity beats proximity
+    assert scoped[1]["template"].scope == "global"
+
+
+def test_semantic_dedup_skips_near_identical(store, monkeypatch):
+    monkeypatch.setenv("TEMPLATE_NEAR_DUP_DISTANCE", "0.1")
+    a = store.add_template(_tmpl(template_id="a", name="one", steps=("Find time",)))
+    # Different exact content (different steps -> different hash) but the same "one"
+    # marker -> identical embedding (distance 0), so semantic dedup collapses it.
+    b = store.add_template(_tmpl(template_id="b", name="one", steps=("Invite",)))
+    assert b == a
+    assert store.get_template("b") is None  # second insert skipped
+
+
+def test_semantic_dedup_allows_distinct(store, monkeypatch):
+    monkeypatch.setenv("TEMPLATE_NEAR_DUP_DISTANCE", "0.1")
+    store.add_template(_tmpl(template_id="a", name="one"))
+    # "three" (vec [0,1]) is cosine-distance ~1.0 from "one" — far above 0.1 — so it
+    # is NOT a near-dup and inserts normally.
+    store.add_template(_tmpl(template_id="c", name="three"))
+    assert store.get_template("a").name == "one"
+    assert store.get_template("c").name == "three"
+
+
+def test_semantic_dedup_off_by_default_inserts(store, monkeypatch):
+    monkeypatch.delenv("TEMPLATE_NEAR_DUP_DISTANCE", raising=False)
+    store.add_template(_tmpl(template_id="a", name="one", steps=("Find time",)))
+    # Same marker/embedding but off by default -> distinct exact content still inserts.
+    store.add_template(_tmpl(template_id="b", name="one", steps=("Invite",)))
+    assert store.get_template("a") is not None
+    assert store.get_template("b") is not None
 
 
 def test_get_template_missing_returns_none(store):

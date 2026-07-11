@@ -150,6 +150,9 @@ class CreateTemplateRequest(BaseModel):
     # instead of generating (threshold search-before-create). Omit to always
     # generate (no false reuse until the threshold is calibrated).
     max_distance: Optional[float] = None
+    # Retrieval-preference scope for the created template: a bare level
+    # ("global"|"org"|"role"|"user") or an owner-qualified label ("user:<id>").
+    scope: str = "global"
 
 
 class SearchTemplatesRequest(BaseModel):
@@ -157,6 +160,10 @@ class SearchTemplatesRequest(BaseModel):
     query: Optional[str] = None
     top_k: int = 5
     max_distance: Optional[float] = None
+    # Ordered scope preference, most-specific first (e.g. ["user:U1","role:R","global"]).
+    # When set, more-specific-scoped templates rank ahead of closer-but-less-specific
+    # ones; unscoped templates still match as a fallback. Omit for pure proximity.
+    scope: Optional[List[str]] = None
 
 
 class TemplateMatch(BaseModel):
@@ -206,7 +213,9 @@ def create_template_endpoint(
         workflow = builder_agent.create_workflow_initial(
             request.task, None, request.user_feedback, thread_id=thread_id
         )
-        template = WorkflowTemplate.from_workflow(workflow, task=request.task)
+        template = WorkflowTemplate.from_workflow(
+            workflow, task=request.task, scope=request.scope
+        )
         template_store.add_template(template)
         return template
     except Exception as exc:
@@ -221,7 +230,10 @@ def search_templates_endpoint(request: SearchTemplatesRequest):
         raise HTTPException(status_code=400, detail="Provide a task or a query")
     try:
         matches = template_store.search_templates(
-            query, top_k=request.top_k, max_distance=request.max_distance
+            query,
+            top_k=request.top_k,
+            max_distance=request.max_distance,
+            scope=request.scope,
         )
         return SearchTemplatesResponse(matches=[TemplateMatch(**m) for m in matches])
     except Exception as exc:

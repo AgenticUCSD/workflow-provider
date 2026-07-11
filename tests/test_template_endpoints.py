@@ -63,6 +63,28 @@ class CreateTemplateTests(unittest.TestCase):
         mock_build.assert_called_once()
         mock_add.assert_called_once()
 
+    def test_create_threads_scope_to_template(self):
+        wf = Workflow(workflow_id="w1", name="Sched", description="d", steps=["Find time"])
+        with (
+            patch.object(app_module.builder_agent, "create_workflow_initial", return_value=wf),
+            patch.object(app_module.template_store, "add_template", return_value="doc1"),
+        ):
+            resp = self.client.post(
+                "/create_template",
+                json={"task": build_task().model_dump(mode="json"), "scope": "user:U1"},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["scope"], "user:U1")
+
+    def test_create_default_scope_is_global(self):
+        wf = Workflow(workflow_id="w1", name="Sched", description="d", steps=["Find time"])
+        with (
+            patch.object(app_module.builder_agent, "create_workflow_initial", return_value=wf),
+            patch.object(app_module.template_store, "add_template", return_value="doc1"),
+        ):
+            resp = self.client.post("/create_template", json={"task": build_task().model_dump(mode="json")})
+        self.assertEqual(resp.json()["scope"], "global")
+
     def test_create_reuses_within_threshold_and_skips_build(self):
         existing = build_template("reused")
         match = {"template": existing, "distance": 0.1, "score": 0.9}
@@ -96,6 +118,19 @@ class SearchTemplatesTests(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["template"]["template_id"], "m1")
         self.assertEqual(matches[0]["score"], 0.83)
+
+    def test_search_forwards_scope_preference(self):
+        match = {"template": build_template("m1"), "distance": 0.2, "score": 0.83}
+        with patch.object(
+            app_module.template_store, "search_templates", return_value=[match]
+        ) as mock_search:
+            resp = self.client.post(
+                "/search_templates",
+                json={"query": "schedule", "scope": ["user:U1", "global"]},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        # The ordered scope preference reached the store.
+        self.assertEqual(mock_search.call_args.kwargs["scope"], ["user:U1", "global"])
 
     def test_search_without_query_or_task_is_400(self):
         resp = self.client.post("/search_templates", json={})
