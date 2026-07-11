@@ -299,6 +299,7 @@ def populate_task_context_endpoint(
     request: PopulateTaskContextRequest,
     x_user_id: Optional[str] = Header(None),
     x_thread_id: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
 ):
     """Fill a task's *missing* parameters from user context (memory-unit) before HITL.
 
@@ -306,11 +307,17 @@ def populate_task_context_endpoint(
     unreachable) the task is returned unchanged. Only ``missing`` slots are
     touched — email-provided values are preserved — and resolved values are
     marked ``guessed`` with a ``source``/``confidence`` so the UI can confirm them.
+
+    The caller's ``Authorization`` bearer is forwarded to memory-unit so
+    ``/resolve`` passes when memory-unit validates tokens.
     """
     thread_id = request.thread_id or x_thread_id
     try:
         return populate_context_items(
-            request.task, user_id=x_user_id, thread_id=thread_id
+            request.task,
+            user_id=x_user_id,
+            thread_id=thread_id,
+            authorization=authorization,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -322,6 +329,7 @@ def identify_task_endpoint(
     request: IdentifyTaskRequest,
     x_user_id: Optional[str] = Header(None),
     x_thread_id: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
 ):
     thread_id = request.thread_id or x_thread_id
     try:
@@ -344,7 +352,10 @@ def identify_task_endpoint(
         # default (MEMORY_AUTO_POPULATE); a no-op unless MEMORY_URL is also set.
         if auto_populate_enabled():
             task = populate_context_items(
-                task, user_id=x_user_id, thread_id=thread_id
+                task,
+                user_id=x_user_id,
+                thread_id=thread_id,
+                authorization=authorization,
             )
 
         # Fill the typed signature (slot `type`) deterministically before returning,

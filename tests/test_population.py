@@ -114,6 +114,67 @@ def test_populate_never_touches_present_or_guessed(monkeypatch):
     assert by["topic"].status == "guessed" and by["topic"].value == "g"
 
 
+# ── bearer forwarding (provider -> memory-unit) ────────────────
+
+def test_resolve_slots_forwards_authorization(monkeypatch):
+    seen = {}
+
+    def capture(url, payload, headers, timeout):
+        seen["headers"] = headers
+        return []
+
+    monkeypatch.setenv("MEMORY_URL", "http://localhost:9")
+    monkeypatch.setattr(memory_client, "_post_resolve", capture)
+    memory_client.resolve_slots(
+        ["recipient"], user_id="u1", authorization="Bearer ya29.tok"
+    )
+    assert seen["headers"]["Authorization"] == "Bearer ya29.tok"
+    assert seen["headers"]["X-User-Id"] == "u1"
+
+
+def test_resolve_slots_omits_authorization_when_absent(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("MEMORY_URL", "http://localhost:9")
+    monkeypatch.setattr(
+        memory_client, "_post_resolve",
+        lambda url, payload, headers, timeout: seen.setdefault("headers", headers) or [],
+    )
+    memory_client.resolve_slots(["recipient"], user_id="u1")
+    assert "Authorization" not in seen["headers"]
+
+
+def test_populate_forwards_authorization(monkeypatch):
+    seen = {}
+
+    def fake(fields, **kw):
+        seen.update(kw)
+        return []
+
+    monkeypatch.setattr(population, "resolve_slots", fake)
+    task = _task_with_items([ContextItem(field="recipient", status="missing")])
+    population.populate_context_items(task, user_id="u1", authorization="Bearer t")
+    assert seen["authorization"] == "Bearer t"
+
+
+def test_populate_endpoint_forwards_incoming_bearer(monkeypatch):
+    seen = {}
+
+    def fake(fields, **kw):
+        seen.update(kw)
+        return []
+
+    monkeypatch.setattr(population, "resolve_slots", fake)
+    task = _task_with_items([ContextItem(field="recipient", status="missing")])
+    client = TestClient(app_module.app)
+    resp = client.post(
+        "/populate_task_context",
+        json={"task": task.model_dump(mode="json")},
+        headers={"X-User-Id": "user-1", "Authorization": "Bearer ya29.incoming"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert seen["authorization"] == "Bearer ya29.incoming"
+
+
 # ── memory_client (flag-gated) ─────────────────────────────────
 
 def test_resolve_slots_disabled_returns_empty(monkeypatch):
