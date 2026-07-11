@@ -33,6 +33,7 @@ def populate_context_items(
     task: Task,
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
+    authorization: Optional[str] = None,
     min_confidence: float = 0.0,
 ) -> Task:
     """Fill ``missing`` context items on ``task`` from memory-unit.
@@ -42,6 +43,9 @@ def populate_context_items(
     ``"present"``) and carry ``source`` + ``confidence`` so the UI can still
     surface them for the user to confirm — a resolved-from-context value is a
     suggestion, not ground truth. Returns the same ``task`` (mutated in place).
+
+    ``authorization`` is the caller's incoming ``Authorization`` header, forwarded
+    to memory-unit so ``/resolve`` passes when memory-unit validates tokens.
     """
     items = task.context_items or []
     # Only fill slots the email left "missing". Values it supplied ("present") and
@@ -51,7 +55,9 @@ def populate_context_items(
         return task
 
     fields = [ci.field for ci in missing]
-    resolved = resolve_slots(fields, user_id=user_id, thread_id=thread_id)
+    resolved = resolve_slots(
+        fields, user_id=user_id, thread_id=thread_id, authorization=authorization
+    )
     by_field = {r.get("field"): r for r in resolved if isinstance(r, dict)}
 
     for ci in missing:

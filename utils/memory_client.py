@@ -45,6 +45,7 @@ def resolve_slots(
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     scope: Optional[List[str]] = None,
+    authorization: Optional[str] = None,
     timeout: float = 5.0,
 ) -> List[Dict[str, Any]]:
     """Call memory-unit ``/resolve`` for the given slot names.
@@ -52,6 +53,11 @@ def resolve_slots(
     Returns a list of ``{field, value, source, confidence, status}`` dicts. On
     any problem returns ``[]`` — this function never raises, so callers can treat
     it as best-effort enrichment.
+
+    ``authorization`` is the caller's incoming ``Authorization`` header
+    (``"Bearer <token>"``), forwarded verbatim. memory-unit verifies it on
+    ``/resolve`` when ``MEMORY_VALIDATE_TOKEN`` is on, so without it that call
+    401s; harmless when memory-unit runs with validation off.
     """
     base_url = os.getenv("MEMORY_URL")
     if not base_url or not fields:
@@ -60,10 +66,13 @@ def resolve_slots(
     url = base_url.rstrip("/") + "/resolve"
     payload = json.dumps({"fields": fields, "scope": scope}).encode("utf-8")
     headers = {"Content-Type": "application/json"}
-    # memory-unit's tenancy guard requires X-User-Id; X-Thread-Id is optional.
+    # memory-unit's tenancy guard requires X-User-Id; X-Thread-Id is optional;
+    # the bearer is required only when memory-unit validates tokens.
     if user_id:
         headers["X-User-Id"] = user_id
     if thread_id:
         headers["X-Thread-Id"] = thread_id
+    if authorization:
+        headers["Authorization"] = authorization
 
     return _post_resolve(url, payload, headers, timeout)
