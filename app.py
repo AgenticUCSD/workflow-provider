@@ -12,6 +12,8 @@ from utils.population import auto_populate_enabled, populate_context_items
 from utils.slots import normalize_slots
 from utils.template import EnrichedInstance, WorkflowTemplate
 from utils.config import make_template_store, make_workflow_store, make_instance_store
+from utils.artifact_client import artifacts_enabled, post_template
+from utils.artifact_envelope import GLOBAL_USER_ID
 
 app = FastAPI(title="Agent Infrastructure API")
 
@@ -266,6 +268,63 @@ def enrich_template_endpoint(
     except Exception as exc:  # noqa: BLE001
         print(f"[enrich_template] failed to persist instance: {exc}")
     return EnrichTemplateResponse(instance=instance, workflow=instance.to_workflow())
+
+
+class PromoteTemplateRequest(BaseModel):
+    template_id: str
+    version: Optional[int] = None
+    source_trace_ids: List[str] = Field(default_factory=list)
+
+
+class PromoteTemplateResponse(BaseModel):
+    status: Literal["written", "disabled", "error"]
+    artifact: Optional[Dict] = None
+    detail: Optional[str] = None
+
+
+@app.post("/promote_template", response_model=PromoteTemplateResponse)
+def promote_template_endpoint(
+    request: PromoteTemplateRequest,
+    x_user_id: Optional[str] = Header(None),
+    x_thread_id: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Publish a stored template to the executor's artifact store as a **draft**.
+
+    This writes the template (via ``to_envelope``) to the executor's ``POST
+    /artifacts`` so it can be promoted through the executor's eval gate and read
+    back at execute time (P-LEARN1). It does **not** promote to ``trusted`` — that
+    is the executor's gate, not ours. (Named ``/promote_template`` per convergence.md.)
+
+    Flag-gated: a no-op returning ``status="disabled"`` unless ``EXECUTOR_ARTIFACTS_URL``
+    is set. The template is written as a **global** (``user_id="*"``) artifact so the
+    executor's read-back serves it to any user. Requires the caller's Google bearer +
+    ``X-User-Id`` (both forwarded to the executor, which mandates them).
+    """
+    if not artifacts_enabled():
+        return PromoteTemplateResponse(status="disabled")
+    if not x_user_id or not authorization:
+        raise HTTPException(
+            status_code=400,
+            detail="X-User-Id and Authorization headers are required",
+        )
+    template = template_store.get_template(request.template_id, version=request.version)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    artifact = post_template(
+        template,
+        user_id=GLOBAL_USER_ID,
+        x_user_id=x_user_id,
+        source_trace_ids=request.source_trace_ids,
+        authorization=authorization,
+        thread_id=x_thread_id,
+    )
+    if artifact is None:
+        return PromoteTemplateResponse(
+            status="error", detail="Executor artifact write failed"
+        )
+    return PromoteTemplateResponse(status="written", artifact=artifact)
 
 
 @app.post("/edit_workflow", response_model=Workflow)
