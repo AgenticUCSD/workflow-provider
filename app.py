@@ -9,7 +9,7 @@ from agents.search_agent import SearchAgent
 from utils.task import Task, TaskTypes, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
 from utils.population import auto_populate_enabled, populate_context_items
-from utils.slots import normalize_slots
+from utils.slots import normalize_slots, normalize_slot_values, tz_normalize_enabled
 from utils.template import EnrichedInstance, WorkflowTemplate
 from utils.config import make_template_store, make_workflow_store, make_instance_store
 from utils.artifact_client import artifacts_enabled, post_template
@@ -355,6 +355,8 @@ def edit_task_endpoint(
         # A conversation edit round-trips the full typed slot signature: re-fill `type`
         # on any slot the editor left untyped (idempotent; explicit types preserved).
         edited_task.context_items = normalize_slots(edited_task.context_items)
+        if tz_normalize_enabled():
+            edited_task.context_items = normalize_slot_values(edited_task.context_items)
         context_items = edited_task.context_items or []
         return EditTaskResponse(
             status="edited",
@@ -432,6 +434,8 @@ def identify_task_endpoint(
         # Fill the typed signature (slot `type`) deterministically before returning,
         # so every emitted slot is fully typed. Idempotent; never overwrites.
         task.context_items = normalize_slots(task.context_items)
+        if tz_normalize_enabled():
+            task.context_items = normalize_slot_values(task.context_items)
 
         return IdentifyTaskResponse(
             status="identified",

@@ -2,7 +2,8 @@
 
 import os
 import unittest
-from unittest.mock import patch
+from datetime import datetime, timezone
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
@@ -16,7 +17,9 @@ except ModuleNotFoundError:
 
 from agents.task_agent import (
     ContextItem,
+    IdentifyTaskResult,
     TaskIdentifierAgent,
+    _TaskExtraction,
 )
 from utils.task import Objective, Status, Task, TaskTypes, Workflow
 
@@ -140,6 +143,34 @@ class TaskIdentifierAgentTests(unittest.TestCase):
             deadline_iso,
         )
 
+    def test_identify_task_grounds_current_date_in_message(self) -> None:
+        agent = self.make_agent()
+
+        stub_llm = Mock()
+        stub_llm.invoke = Mock(return_value={"messages": []})
+        agent.agent = stub_llm
+        agent._agent_config = Mock(return_value={})
+
+        extraction = _TaskExtraction(
+            task_type=TaskTypes.SCHEDULE,
+            priority="normal",
+            objective_name="Schedule sync",
+            objective_description="Schedule a sync meeting",
+            deadline_iso=None,
+            context_items=[],
+        )
+
+        with patch("agents.task_agent.extract_structured_output", return_value=extraction):
+            agent.identify_task(text="let's meet Friday", subject="Meet", metadata=None)
+
+        stub_llm.invoke.assert_called_once()
+        call_args = stub_llm.invoke.call_args
+        messages_payload = call_args[0][0]
+        content = messages_payload["messages"][0]["content"]
+
+        expected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        self.assertIn(expected_date, content)
+
 
 @unittest.skipUnless(HAS_ENDPOINT_DEPS, "Endpoint dependencies are unavailable")
 class IdentifyEndpointTests(unittest.TestCase):
@@ -242,6 +273,58 @@ class IdentifyEndpointTests(unittest.TestCase):
         by = {c["field"]: c for c in response.json()["context_items"]}
         self.assertEqual(by["participants"]["type"], "email")  # value shape wins
         self.assertEqual(by["duration"]["type"], "number")     # field-name hint
+
+    def test_identify_tz_normalize_flag_on_repairs_loose_timezone(self) -> None:
+        task = build_task(TaskTypes.SCHEDULE)
+        items = [ContextItem(field="timezone", status="present", value="Pacific Time")]
+        task.context_items = items
+        result = IdentifyTaskResult(task=task, context_items=items)
+
+        with (
+            patch.dict(os.environ, {"IDENTIFY_TZ_NORMALIZE": "true"}),
+            patch.object(
+                app_module.task_identifier_agent, "identify_task", return_value=result
+            ),
+        ):
+            response = self.client.post(IDENTIFY_PATH, json={"text": "schedule a call at 3pm Pacific Time"})
+        self.assertEqual(response.status_code, 200, response.text)
+        by = {c["field"]: c for c in response.json()["context_items"]}
+        self.assertEqual(by["timezone"]["value"], "America/Los_Angeles")
+
+    def test_identify_tz_normalize_flag_on_leaves_ambiguous_value_untouched(self) -> None:
+        task = build_task(TaskTypes.SCHEDULE)
+        items = [ContextItem(field="timezone", status="present", value="CST")]
+        task.context_items = items
+        result = IdentifyTaskResult(task=task, context_items=items)
+
+        with (
+            patch.dict(os.environ, {"IDENTIFY_TZ_NORMALIZE": "true"}),
+            patch.object(
+                app_module.task_identifier_agent, "identify_task", return_value=result
+            ),
+        ):
+            response = self.client.post(IDENTIFY_PATH, json={"text": "schedule a call at 3pm CST"})
+        self.assertEqual(response.status_code, 200, response.text)
+        by = {c["field"]: c for c in response.json()["context_items"]}
+        self.assertEqual(by["timezone"]["value"], "CST")
+
+    def test_identify_tz_normalize_flag_off_by_default(self) -> None:
+        task = build_task(TaskTypes.SCHEDULE)
+        items = [ContextItem(field="timezone", status="present", value="Pacific Time")]
+        task.context_items = items
+        result = IdentifyTaskResult(task=task, context_items=items)
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            os.environ.pop("IDENTIFY_TZ_NORMALIZE", None)
+            with patch.object(
+                app_module.task_identifier_agent, "identify_task", return_value=result
+            ):
+                response = self.client.post(IDENTIFY_PATH, json={"text": "schedule a call at 3pm Pacific Time"})
+        self.assertEqual(response.status_code, 200, response.text)
+        by = {c["field"]: c for c in response.json()["context_items"]}
+        self.assertEqual(by["timezone"]["value"], "Pacific Time")
 
     def test_edit_task_normalizes_slot_types(self) -> None:
         edited = build_task(TaskTypes.SCHEDULE)
