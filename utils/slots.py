@@ -12,6 +12,7 @@ from typing import List, Optional
 
 from utils.task import ContextItem
 from utils.timezones import normalize_timezone
+from utils.durations import normalize_duration
 
 # The small closed vocabulary. `string` is the fallback.
 SLOT_TYPES = ("string", "email", "date", "number", "url", "ref")
@@ -82,4 +83,23 @@ def normalize_slot_values(items: Optional[List[ContextItem]]) -> Optional[List[C
         name = (ci.field or "").strip().lower()
         if "timezone" in name or "time_zone" in name or "tz" in name:
             ci.value = normalize_timezone(ci.value)
+    return items
+
+
+def duration_normalize_enabled() -> bool:
+    """Whether duration slot *value* normalization is on. Default off."""
+    return os.getenv("IDENTIFY_DURATION_NORMALIZE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def normalize_duration_slots(items: Optional[List[ContextItem]]) -> Optional[List[ContextItem]]:
+    """Repair loose duration slot *values* to integer minutes. Opt-in via
+    IDENTIFY_DURATION_NORMALIZE. Only touches slots whose field name looks like a
+    duration/length; all other slots pass through untouched. None-safe.
+    """
+    if not items:
+        return items
+    for ci in items:
+        name = (ci.field or "").strip().lower()
+        if "duration" in name or "length" in name:
+            ci.value = normalize_duration(ci.value)
     return items
