@@ -6,10 +6,12 @@ stable and testable. Kept intentionally tiny (plan guardrail: don't build a type
 theory): ``string | email | date | number | url | ref``.
 """
 
+import os
 import re
 from typing import List, Optional
 
 from utils.task import ContextItem
+from utils.timezones import normalize_timezone
 
 # The small closed vocabulary. `string` is the fallback.
 SLOT_TYPES = ("string", "email", "date", "number", "url", "ref")
@@ -61,4 +63,23 @@ def normalize_slots(items: Optional[List[ContextItem]]) -> Optional[List[Context
     for ci in items:
         if ci.type is None:
             ci.type = infer_slot_type(ci.field, ci.value)
+    return items
+
+
+def tz_normalize_enabled() -> bool:
+    """Whether timezone slot *value* normalization is on. Default off."""
+    return os.getenv("IDENTIFY_TZ_NORMALIZE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def normalize_slot_values(items: Optional[List[ContextItem]]) -> Optional[List[ContextItem]]:
+    """Repair loose timezone slot *values* to canonical IANA form. Opt-in via
+    IDENTIFY_TZ_NORMALIZE. Only touches slots whose field name looks like a timezone;
+    all other slots pass through untouched. None-safe.
+    """
+    if not items:
+        return items
+    for ci in items:
+        name = (ci.field or "").strip().lower()
+        if "timezone" in name or "time_zone" in name or "tz" in name:
+            ci.value = normalize_timezone(ci.value)
     return items
