@@ -10,7 +10,13 @@ from utils.task import Task, TaskTypes, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
 from agents.intent_agent import IntentClassifierAgent, IntentLabel, intent_router_enabled
 from utils.population import auto_populate_enabled, populate_context_items
-from utils.slots import normalize_slots, normalize_slot_values, tz_normalize_enabled
+from utils.slots import (
+    normalize_slots,
+    normalize_slot_values,
+    tz_normalize_enabled,
+    normalize_duration_slots,
+    duration_normalize_enabled,
+)
 from utils.template import EnrichedInstance, WorkflowTemplate
 from utils.config import make_template_store, make_workflow_store, make_instance_store
 from utils.artifact_client import artifacts_enabled, post_template
@@ -370,6 +376,8 @@ def edit_task_endpoint(
         edited_task.context_items = normalize_slots(edited_task.context_items)
         if tz_normalize_enabled():
             edited_task.context_items = normalize_slot_values(edited_task.context_items)
+        if duration_normalize_enabled():
+            edited_task.context_items = normalize_duration_slots(edited_task.context_items)
         context_items = edited_task.context_items or []
         return EditTaskResponse(
             status="edited",
@@ -449,6 +457,8 @@ def identify_task_endpoint(
         task.context_items = normalize_slots(task.context_items)
         if tz_normalize_enabled():
             task.context_items = normalize_slot_values(task.context_items)
+        if duration_normalize_enabled():
+            task.context_items = normalize_duration_slots(task.context_items)
 
         return IdentifyTaskResponse(
             status="identified",

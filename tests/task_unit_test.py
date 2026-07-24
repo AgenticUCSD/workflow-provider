@@ -326,6 +326,58 @@ class IdentifyEndpointTests(unittest.TestCase):
         by = {c["field"]: c for c in response.json()["context_items"]}
         self.assertEqual(by["timezone"]["value"], "Pacific Time")
 
+    def test_identify_duration_normalize_flag_on_repairs_loose_duration(self) -> None:
+        task = build_task(TaskTypes.SCHEDULE)
+        items = [ContextItem(field="duration", status="present", value="30 minutes")]
+        task.context_items = items
+        result = IdentifyTaskResult(task=task, context_items=items)
+
+        with (
+            patch.dict(os.environ, {"IDENTIFY_DURATION_NORMALIZE": "true"}),
+            patch.object(
+                app_module.task_identifier_agent, "identify_task", return_value=result
+            ),
+        ):
+            response = self.client.post(IDENTIFY_PATH, json={"text": "schedule a 30 minute sync"})
+        self.assertEqual(response.status_code, 200, response.text)
+        by = {c["field"]: c for c in response.json()["context_items"]}
+        self.assertEqual(by["duration"]["value"], "30")
+
+    def test_identify_duration_normalize_flag_on_leaves_range_untouched(self) -> None:
+        task = build_task(TaskTypes.SCHEDULE)
+        items = [ContextItem(field="duration", status="present", value="30-45 minutes")]
+        task.context_items = items
+        result = IdentifyTaskResult(task=task, context_items=items)
+
+        with (
+            patch.dict(os.environ, {"IDENTIFY_DURATION_NORMALIZE": "true"}),
+            patch.object(
+                app_module.task_identifier_agent, "identify_task", return_value=result
+            ),
+        ):
+            response = self.client.post(IDENTIFY_PATH, json={"text": "schedule a 30-45 minute sync"})
+        self.assertEqual(response.status_code, 200, response.text)
+        by = {c["field"]: c for c in response.json()["context_items"]}
+        self.assertEqual(by["duration"]["value"], "30-45 minutes")
+
+    def test_identify_duration_normalize_flag_off_by_default(self) -> None:
+        task = build_task(TaskTypes.SCHEDULE)
+        items = [ContextItem(field="duration", status="present", value="30 minutes")]
+        task.context_items = items
+        result = IdentifyTaskResult(task=task, context_items=items)
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            os.environ.pop("IDENTIFY_DURATION_NORMALIZE", None)
+            with patch.object(
+                app_module.task_identifier_agent, "identify_task", return_value=result
+            ):
+                response = self.client.post(IDENTIFY_PATH, json={"text": "schedule a 30 minute sync"})
+        self.assertEqual(response.status_code, 200, response.text)
+        by = {c["field"]: c for c in response.json()["context_items"]}
+        self.assertEqual(by["duration"]["value"], "30 minutes")
+
     def test_edit_task_normalizes_slot_types(self) -> None:
         edited = build_task(TaskTypes.SCHEDULE)
         edited.context_items = [
