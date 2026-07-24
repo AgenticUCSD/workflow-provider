@@ -378,6 +378,58 @@ class IdentifyEndpointTests(unittest.TestCase):
         by = {c["field"]: c for c in response.json()["context_items"]}
         self.assertEqual(by["duration"]["value"], "30 minutes")
 
+    def test_identify_email_normalize_flag_on_repairs_loose_email(self) -> None:
+        task = build_task(TaskTypes.SCHEDULE)
+        items = [ContextItem(field="cc", status="present", value="Bob <bob@x.com>")]
+        task.context_items = items
+        result = IdentifyTaskResult(task=task, context_items=items)
+
+        with (
+            patch.dict(os.environ, {"IDENTIFY_EMAIL_NORMALIZE": "true"}),
+            patch.object(
+                app_module.task_identifier_agent, "identify_task", return_value=result
+            ),
+        ):
+            response = self.client.post(IDENTIFY_PATH, json={"text": "cc Bob on this"})
+        self.assertEqual(response.status_code, 200, response.text)
+        by = {c["field"]: c for c in response.json()["context_items"]}
+        self.assertEqual(by["cc"]["value"], "bob@x.com")
+
+    def test_identify_email_normalize_flag_on_leaves_name_only_untouched(self) -> None:
+        task = build_task(TaskTypes.SCHEDULE)
+        items = [ContextItem(field="cc", status="present", value="the whole team")]
+        task.context_items = items
+        result = IdentifyTaskResult(task=task, context_items=items)
+
+        with (
+            patch.dict(os.environ, {"IDENTIFY_EMAIL_NORMALIZE": "true"}),
+            patch.object(
+                app_module.task_identifier_agent, "identify_task", return_value=result
+            ),
+        ):
+            response = self.client.post(IDENTIFY_PATH, json={"text": "cc the whole team on this"})
+        self.assertEqual(response.status_code, 200, response.text)
+        by = {c["field"]: c for c in response.json()["context_items"]}
+        self.assertEqual(by["cc"]["value"], "the whole team")
+
+    def test_identify_email_normalize_flag_off_by_default(self) -> None:
+        task = build_task(TaskTypes.SCHEDULE)
+        items = [ContextItem(field="cc", status="present", value="Bob <bob@x.com>")]
+        task.context_items = items
+        result = IdentifyTaskResult(task=task, context_items=items)
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            os.environ.pop("IDENTIFY_EMAIL_NORMALIZE", None)
+            with patch.object(
+                app_module.task_identifier_agent, "identify_task", return_value=result
+            ):
+                response = self.client.post(IDENTIFY_PATH, json={"text": "cc Bob on this"})
+        self.assertEqual(response.status_code, 200, response.text)
+        by = {c["field"]: c for c in response.json()["context_items"]}
+        self.assertEqual(by["cc"]["value"], "Bob <bob@x.com>")
+
     def test_edit_task_normalizes_slot_types(self) -> None:
         edited = build_task(TaskTypes.SCHEDULE)
         edited.context_items = [
