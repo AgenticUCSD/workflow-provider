@@ -8,8 +8,17 @@ from agents.builder_agent import BuilderAgent
 from agents.search_agent import SearchAgent
 from utils.task import Task, TaskTypes, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
+from agents.intent_agent import IntentClassifierAgent, IntentLabel, intent_router_enabled
 from utils.population import auto_populate_enabled, populate_context_items
-from utils.slots import normalize_slots
+from utils.slots import (
+    normalize_slots,
+    normalize_slot_values,
+    tz_normalize_enabled,
+    normalize_duration_slots,
+    duration_normalize_enabled,
+    normalize_email_slots,
+    email_normalize_enabled,
+)
 from utils.template import EnrichedInstance, WorkflowTemplate
 from utils.config import make_template_store, make_workflow_store, make_instance_store
 from utils.artifact_client import artifacts_enabled, post_template
@@ -21,6 +30,7 @@ workflow_store = make_workflow_store()
 builder_agent = BuilderAgent(vector_db=workflow_store)
 search_agent = SearchAgent(vector_db=workflow_store)
 task_identifier_agent = TaskIdentifierAgent()
+intent_classifier_agent = IntentClassifierAgent()
 template_store = make_template_store()
 instance_store = make_instance_store()
 
@@ -56,6 +66,17 @@ class IdentifyTaskResponse(BaseModel):
     status: Literal["identified", "no_task"]
     task: Optional[Task] = None
     context_items: List[ContextItem] = Field(default_factory=list)
+
+
+class ClassifyIntentRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    phase: str = "task"
+    thread_id: Optional[str] = None
+
+
+class ClassifyIntentResponse(BaseModel):
+    intent: Optional[IntentLabel] = None
+    status: Literal["classified", "disabled", "error"] = "classified"
 
 
 class EditTaskResponse(BaseModel):
@@ -355,6 +376,12 @@ def edit_task_endpoint(
         # A conversation edit round-trips the full typed slot signature: re-fill `type`
         # on any slot the editor left untyped (idempotent; explicit types preserved).
         edited_task.context_items = normalize_slots(edited_task.context_items)
+        if tz_normalize_enabled():
+            edited_task.context_items = normalize_slot_values(edited_task.context_items)
+        if duration_normalize_enabled():
+            edited_task.context_items = normalize_duration_slots(edited_task.context_items)
+        if email_normalize_enabled():
+            edited_task.context_items = normalize_email_slots(edited_task.context_items)
         context_items = edited_task.context_items or []
         return EditTaskResponse(
             status="edited",
@@ -432,6 +459,12 @@ def identify_task_endpoint(
         # Fill the typed signature (slot `type`) deterministically before returning,
         # so every emitted slot is fully typed. Idempotent; never overwrites.
         task.context_items = normalize_slots(task.context_items)
+        if tz_normalize_enabled():
+            task.context_items = normalize_slot_values(task.context_items)
+        if duration_normalize_enabled():
+            task.context_items = normalize_duration_slots(task.context_items)
+        if email_normalize_enabled():
+            task.context_items = normalize_email_slots(task.context_items)
 
         return IdentifyTaskResponse(
             status="identified",
@@ -440,6 +473,28 @@ def identify_task_endpoint(
         )
     except Exception:
         raise HTTPException(status_code=502, detail="Task identification failed")
+
+
+@app.post("/classify_intent", response_model=ClassifyIntentResponse)
+def classify_intent_endpoint(
+    request: ClassifyIntentRequest,
+    x_user_id: Optional[str] = Header(None),
+    x_thread_id: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    if not intent_router_enabled():
+        return ClassifyIntentResponse(intent=None, status="disabled")
+    thread_id = request.thread_id or x_thread_id
+    try:
+        result = intent_classifier_agent.classify(
+            text=request.text, phase=request.phase, thread_id=thread_id
+        )
+        if result is None:
+            return ClassifyIntentResponse(intent=None, status="error")
+        return ClassifyIntentResponse(intent=result.intent, status="classified")
+    except Exception:
+        return ClassifyIntentResponse(intent=None, status="error")
+
 
 class EnrichTaskRequest(BaseModel):
     task: Task

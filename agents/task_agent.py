@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from deepeval.integrations.langchain import CallbackHandler
@@ -51,6 +52,8 @@ Context fields by task type (extract or infer what you can):
 - draft: topic, format, audience, key_points
 - review: artifact_link, review_criteria, deadline
 - schedule: participants, duration, time_window, timezone, meeting link
+  When a timezone is present, output it as an IANA identifier (e.g. "America/Los_Angeles"),
+  never a colloquial name like "Pacific Time".
 - respond: question_context, sender_priority
 - execute: deliverable_description, resources_needed
 - decision: stakeholders, decision_criteria, default_action
@@ -65,6 +68,8 @@ Deadline extraction rules:
 - If email mentions a real deadline (e.g., "by 5pm today", "before Friday", "EOD"), extract as ISO8601
 - Schedule tasks may have deadlines for completing the scheduling itself
 - If no deadline, leave deadline_iso null
+- Resolve relative date references ("Friday", "next week", "EOD", "tomorrow") against the
+  current date given in the message and always emit the correct year in ISO8601 output.
 """.strip()
 
 TASK_EDITOR_PROMPT = """You are a task editor. Revise the provided task using the user's feedback.
@@ -130,7 +135,12 @@ class TaskIdentifierAgent:
     ) -> IdentifyTaskResult:
         processed = self.preprocess_email(text, subject)
 
-        content = f"Analyze this email and extract task information.\n\n{processed}"
+        today = datetime.now(timezone.utc).strftime("%A, %Y-%m-%d")
+        content = (
+            f"Current date: {today} (UTC). Resolve relative dates (e.g. \"Friday\", "
+            f"\"next week\", \"EOD\") against this date and use the correct year.\n\n"
+            f"Analyze this email and extract task information.\n\n{processed}"
+        )
         if metadata:
             content += f"\n\nAdditional metadata: {metadata}"
 

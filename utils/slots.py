@@ -6,10 +6,14 @@ stable and testable. Kept intentionally tiny (plan guardrail: don't build a type
 theory): ``string | email | date | number | url | ref``.
 """
 
+import os
 import re
 from typing import List, Optional
 
 from utils.task import ContextItem
+from utils.timezones import normalize_timezone
+from utils.durations import normalize_duration
+from utils.emails import normalize_email
 
 # The small closed vocabulary. `string` is the fallback.
 SLOT_TYPES = ("string", "email", "date", "number", "url", "ref")
@@ -61,4 +65,66 @@ def normalize_slots(items: Optional[List[ContextItem]]) -> Optional[List[Context
     for ci in items:
         if ci.type is None:
             ci.type = infer_slot_type(ci.field, ci.value)
+    return items
+
+
+def tz_normalize_enabled() -> bool:
+    """Whether timezone slot *value* normalization is on. Default off."""
+    return os.getenv("IDENTIFY_TZ_NORMALIZE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def normalize_slot_values(items: Optional[List[ContextItem]]) -> Optional[List[ContextItem]]:
+    """Repair loose timezone slot *values* to canonical IANA form. Opt-in via
+    IDENTIFY_TZ_NORMALIZE. Only touches slots whose field name looks like a timezone;
+    all other slots pass through untouched. None-safe.
+    """
+    if not items:
+        return items
+    for ci in items:
+        name = (ci.field or "").strip().lower()
+        if "timezone" in name or "time_zone" in name or "tz" in name:
+            ci.value = normalize_timezone(ci.value)
+    return items
+
+
+def duration_normalize_enabled() -> bool:
+    """Whether duration slot *value* normalization is on. Default off."""
+    return os.getenv("IDENTIFY_DURATION_NORMALIZE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def normalize_duration_slots(items: Optional[List[ContextItem]]) -> Optional[List[ContextItem]]:
+    """Repair loose duration slot *values* to integer minutes. Opt-in via
+    IDENTIFY_DURATION_NORMALIZE. Only touches slots whose field name looks like a
+    duration/length; all other slots pass through untouched. None-safe.
+    """
+    if not items:
+        return items
+    for ci in items:
+        name = (ci.field or "").strip().lower()
+        if "duration" in name or "length" in name:
+            ci.value = normalize_duration(ci.value)
+    return items
+
+
+def email_normalize_enabled() -> bool:
+    """Whether email slot *value* normalization is on. Default off."""
+    return os.getenv("IDENTIFY_EMAIL_NORMALIZE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+_EMAIL_NORMALIZE_HINTS = (
+    "email", "recipient", "sender", "cc", "delegatee", "to_address", "participant", "attendee",
+)
+
+
+def normalize_email_slots(items: Optional[List[ContextItem]]) -> Optional[List[ContextItem]]:
+    """Repair loose email slot *values* to bare lowercased address(es). Opt-in via
+    IDENTIFY_EMAIL_NORMALIZE. Targets slots typed "email" or whose field name looks
+    like an email field; a no-op on values with no address. None-safe.
+    """
+    if not items:
+        return items
+    for ci in items:
+        name = (ci.field or "").strip().lower()
+        if ci.type == "email" or any(h in name for h in _EMAIL_NORMALIZE_HINTS):
+            ci.value = normalize_email(ci.value)
     return items
