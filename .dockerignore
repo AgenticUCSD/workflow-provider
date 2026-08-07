@@ -16,6 +16,10 @@ __pycache__/
 venv/
 env/
 
+# Secrets / local env (keys come from Cloud Run env vars, never baked into the image)
+.env
+.env.*
+
 # Local artifacts
 chroma_db/
 .pytest_cache/
