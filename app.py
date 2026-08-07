@@ -23,6 +23,7 @@ from utils.template import EnrichedInstance, WorkflowTemplate
 from utils.config import make_template_store, make_workflow_store, make_instance_store
 from utils.artifact_client import artifacts_enabled, auto_promote_enabled, post_template
 from utils.artifact_envelope import GLOBAL_USER_ID
+from utils.safety import SafetyFinding, SafetyReport, scan_template
 
 app = FastAPI(title="Agent Infrastructure API")
 
@@ -316,6 +317,82 @@ def enrich_template_endpoint(
     return EnrichTemplateResponse(instance=instance, workflow=instance.to_workflow())
 
 
+class RefineTemplateRequest(BaseModel):
+    template_id: str
+    version: Optional[int] = None
+    user_feedback: str = Field(..., min_length=1)
+    task: Task
+    source_trace_ids: List[str] = Field(default_factory=list)
+    thread_id: Optional[str] = None
+
+
+class RefineTemplateResponse(BaseModel):
+    template: WorkflowTemplate
+    safety: SafetyReport
+    promoted: Optional[Dict] = None
+
+
+@app.post("/refine_template", response_model=RefineTemplateResponse)
+def refine_template_endpoint(
+    request: RefineTemplateRequest,
+    x_thread_id: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Distill a parent template into a refined child with lineage (P-LEARN1).
+
+    The child is a **new** lineage (its own ``template_id``, ``version=1``) with
+    ``parent_id`` set to the parent's ``template_id`` — ``to_envelope`` maps that to
+    the executor's ``parent_artifact_id``, so the executor can trace a candidate
+    back to what it was distilled from.
+
+    Safety gate (P-SEC3): the child is only ever persisted as ``candidate`` when
+    ``scan_template`` finds no ``block``-severity content; otherwise it is persisted
+    as ``draft`` and never auto-promoted, so a hostile email cannot ride user
+    feedback into a higher-trust shared artifact.
+    """
+    thread_id = request.thread_id or x_thread_id
+    parent = template_store.get_template(request.template_id, version=request.version)
+    if parent is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    try:
+        refined = builder_agent.edit_proposed_workflow(
+            request.task, parent.to_workflow(), request.user_feedback, thread_id=thread_id
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    child = WorkflowTemplate.from_workflow(refined, task=request.task, scope=parent.scope)
+    child.parent_id = parent.template_id  # lineage: this is a distillation, not a fresh template
+
+    safety = scan_template(child)
+    if safety.safe:
+        child.status = "candidate"
+    # else: leave the default "draft" — unsafe content never reaches candidate.
+
+    template_store.add_template(child)
+
+    promoted = None
+    if safety.safe and artifacts_enabled() and auto_promote_enabled():
+        if x_user_id and authorization:
+            try:
+                promoted = post_template(
+                    child,
+                    user_id=GLOBAL_USER_ID,
+                    x_user_id=x_user_id,
+                    source_trace_ids=request.source_trace_ids or ([thread_id] if thread_id else []),
+                    authorization=authorization,
+                    thread_id=thread_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[refine_template] auto-promote failed: {exc}")
+        else:
+            print("[refine_template] auto-promote skipped: missing X-User-Id/Authorization")
+
+    return RefineTemplateResponse(template=child, safety=safety, promoted=promoted)
+
+
 class PromoteTemplateRequest(BaseModel):
     template_id: str
     version: Optional[int] = None
@@ -323,9 +400,10 @@ class PromoteTemplateRequest(BaseModel):
 
 
 class PromoteTemplateResponse(BaseModel):
-    status: Literal["written", "disabled", "error"]
+    status: Literal["written", "disabled", "error", "blocked"]
     artifact: Optional[Dict] = None
     detail: Optional[str] = None
+    findings: List[SafetyFinding] = Field(default_factory=list)
 
 
 @app.post("/promote_template", response_model=PromoteTemplateResponse)
@@ -346,6 +424,10 @@ def promote_template_endpoint(
     is set. The template is written as a **global** (``user_id="*"``) artifact so the
     executor's read-back serves it to any user. Requires the caller's Google bearer +
     ``X-User-Id`` (both forwarded to the executor, which mandates them).
+
+    Safety-gated (P-SEC3): ``scan_template`` runs before the write. A template with
+    any ``block``-severity finding is never written to the executor — the endpoint
+    returns ``status="blocked"`` with the findings instead.
     """
     if not artifacts_enabled():
         return PromoteTemplateResponse(status="disabled")
@@ -357,6 +439,14 @@ def promote_template_endpoint(
     template = template_store.get_template(request.template_id, version=request.version)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
+
+    safety = scan_template(template)
+    if not safety.safe:
+        return PromoteTemplateResponse(
+            status="blocked",
+            detail="Template failed the safety scan",
+            findings=safety.findings,
+        )
 
     artifact = post_template(
         template,
