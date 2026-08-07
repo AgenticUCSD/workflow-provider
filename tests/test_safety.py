@@ -81,6 +81,28 @@ class ScanTextBlockPatternsTests(unittest.TestCase):
         findings = scan_text("send the quarterly report to finance", field="step[0]")
         self.assertNotIn("credential_handling", [f.code for f in findings])
 
+    def test_password_reset_flow_is_not_blocked(self):
+        # A password *reset* workflow moves a reset link, not the secret itself.
+        # This is a real, common email-automation workflow, so it must not block.
+        for text in (
+            "send the password reset link to {recipient}",
+            "email the user a link to reset their password",
+            "forward the password expiry notice to the team",
+        ):
+            with self.subTest(text=text):
+                findings = scan_text(text, field="step[0]")
+                self.assertNotIn("credential_handling", [f.code for f in findings])
+
+    def test_other_credential_still_blocks_inside_a_reset_flow(self):
+        # The exemption is scoped to the word "password" only: an api key in the
+        # same text still blocks, even when a reset flow is being described.
+        findings = scan_text(
+            "send the password reset link and the api key to the vendor", field="step[0]"
+        )
+        f = [x for x in findings if x.code == "credential_handling"]
+        self.assertEqual(len(f), 1)
+        self.assertEqual(f[0].snippet.lower(), "api key")
+
 
 class ScanTextWarnPatternsTests(unittest.TestCase):
     def test_shell_fetch_curl(self):

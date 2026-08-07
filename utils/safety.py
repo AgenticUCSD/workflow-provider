@@ -99,6 +99,16 @@ _SEND_SHARE_VERB_RE = re.compile(
     r"\bsend\b|\bshare\b|\bpost\b|\bemail\b|\bforward\b|\bupload\b|\bpublish\b|\btransmit\b",
     re.IGNORECASE,
 )
+# Password *reset* flows ("send the password reset link") are ordinary, common
+# workflows in an email-automation product — the thing being moved is a reset
+# link, not the secret. Only the term "password" is exempted in this context;
+# every other credential term (api key, access token, …) still blocks.
+_PASSWORD_RESET_RE = re.compile(
+    r"(reset|forgot|forgotten|change|update|expired|expiring)\s+"
+    r"(the\s+|your\s+|their\s+|a\s+)?password"
+    r"|password\s+(reset|change|expiry|expiration|policy)",
+    re.IGNORECASE,
+)
 
 _BLOCK_PATTERNS = [
     ("prompt_injection_override", _PROMPT_INJECTION_RE),
@@ -142,9 +152,15 @@ def scan_text(text: str, *, field: str) -> List[SafetyFinding]:
         if m:
             findings.append(_finding(code, "block", field, m.group(0)))
 
-    cred_match = _CREDENTIAL_TERM_RE.search(text)
-    if cred_match and _SEND_SHARE_VERB_RE.search(text):
-        findings.append(_finding("credential_handling", "block", field, cred_match.group(0)))
+    if _SEND_SHARE_VERB_RE.search(text):
+        in_reset_flow = _PASSWORD_RESET_RE.search(text) is not None
+        for cred_match in _CREDENTIAL_TERM_RE.finditer(text):
+            if in_reset_flow and cred_match.group(0).lower().startswith("password"):
+                continue
+            findings.append(
+                _finding("credential_handling", "block", field, cred_match.group(0))
+            )
+            break  # one finding per field is enough to block; don't spam the report
 
     for code, pattern in _WARN_PATTERNS:
         m = pattern.search(text)
