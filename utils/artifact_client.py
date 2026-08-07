@@ -28,6 +28,19 @@ def artifacts_enabled() -> bool:
     return bool(os.getenv("EXECUTOR_ARTIFACTS_URL"))
 
 
+def auto_promote_enabled() -> bool:
+    """Whether the pipeline should auto-promote newly generated templates. Default off.
+
+    Same truthy-parsing convention as ``utils.slots.tz_normalize_enabled`` /
+    ``duration_normalize_enabled`` (opt-in via ``ARTIFACT_AUTO_PROMOTE``). This flag
+    alone is a no-op: promotion also requires ``EXECUTOR_ARTIFACTS_URL`` to be set
+    (``artifacts_enabled()``) — auto-promote only decides *whether* to call
+    ``post_template`` when the transport is already configured, it does not
+    configure the transport itself.
+    """
+    return os.getenv("ARTIFACT_AUTO_PROMOTE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 @traced(name="artifact.executor.create")
 def _post_artifact(
     url: str, payload: bytes, headers: Dict[str, str], timeout: float

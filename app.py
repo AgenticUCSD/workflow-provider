@@ -21,7 +21,7 @@ from utils.slots import (
 )
 from utils.template import EnrichedInstance, WorkflowTemplate
 from utils.config import make_template_store, make_workflow_store, make_instance_store
-from utils.artifact_client import artifacts_enabled, post_template
+from utils.artifact_client import artifacts_enabled, auto_promote_enabled, post_template
 from utils.artifact_envelope import GLOBAL_USER_ID
 
 app = FastAPI(title="Agent Infrastructure API")
@@ -216,12 +216,20 @@ class EnrichTemplateResponse(BaseModel):
 def create_template_endpoint(
     request: CreateTemplateRequest,
     x_thread_id: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
 ):
     """Generate a versioned template for a task (threshold search-before-create).
 
     Reuses the builder to produce steps, then wraps them as a typed template with
     slots inferred from the task. Persists the new template as a `draft` (the
     Artifact-envelope initial state; promoted to candidate/trusted via the gate).
+
+    Best-effort auto-promotion (``ARTIFACT_AUTO_PROMOTE``, off by default): when
+    enabled alongside ``EXECUTOR_ARTIFACTS_URL`` and the caller's identity headers,
+    a *newly generated* template is also written to the executor's artifact store
+    as a draft, so recurring patterns reach the eval gate without a manual
+    ``/promote_template`` call. Never affects this endpoint's response or status.
     """
     thread_id = request.thread_id or x_thread_id
     try:
@@ -231,6 +239,8 @@ def create_template_endpoint(
                 request.task.to_string(), top_k=1, max_distance=request.max_distance
             )
             if matches:
+                # Reused an existing template — nothing new was created, so there
+                # is nothing to auto-promote.
                 return matches[0]["template"]
 
         workflow = builder_agent.create_workflow_initial(
@@ -240,6 +250,21 @@ def create_template_endpoint(
             workflow, task=request.task, scope=request.scope
         )
         template_store.add_template(template)
+        if artifacts_enabled() and auto_promote_enabled():
+            if x_user_id and authorization:
+                try:
+                    post_template(
+                        template,
+                        user_id=GLOBAL_USER_ID,
+                        x_user_id=x_user_id,
+                        source_trace_ids=[thread_id] if thread_id else [],
+                        authorization=authorization,
+                        thread_id=thread_id,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[create_template] auto-promote failed: {exc}")
+            else:
+                print("[create_template] auto-promote skipped: missing X-User-Id/Authorization")
         return template
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
