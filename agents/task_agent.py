@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -79,17 +80,77 @@ Update context_items status as needed (present/missing/guessed).
 Return the complete updated task with all fields.""".strip()
 
 
+# Appended to both prompts above when IDENTIFY_TONE_PROMPT is on. The demo feedback
+# asked for warmer, less em-dashed copy, and the description is the one piece of
+# LLM-written prose the user actually reads (the side panel renders
+# `objective.description`; `objective.name` is built in code, not by the model).
+#
+# The final paragraph is the important one: it firewalls *wording* from *extraction*,
+# because this prompt was deliberately tuned in PR #19 for date/weekday grounding and
+# a tone instruction must not cost extraction accuracy. Whether that firewall actually
+# holds is an empirical question, measured by
+# claude-context/calibration/ab_tone_prompt.py against a real LLM.
+TONE_GUIDANCE = """
+Voice of the task description you output (the user reads this text directly):
+- Write one or two plain sentences addressed to the user, warm and matter of fact.
+- Do not use em dashes or en dashes. Write separate sentences instead.
+- Do not open with filler such as "Please note that", "It appears that", or
+  "This task involves".
+- Describe only what the email actually asks for. Never add detail to sound fluent.
+
+This governs wording only. Every other field (task type, priority, deadline, and every
+entry in context_items) must still be extracted exactly as specified above. This
+instruction changes how the description reads, never what you extract.
+""".strip()
+
+
+def tone_prompt_enabled() -> bool:
+    """Whether the user-facing tone guidance is appended to the prompts (opt-in).
+
+    Default OFF, matching the other ``IDENTIFY_*`` flags and the repo rule that
+    changes to the live pipeline stay additive and flag-gated. A bare prompt edit
+    would be neither.
+    """
+    return os.getenv("IDENTIFY_TONE_PROMPT", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def identify_system_prompt() -> str:
+    """The task-identification system prompt, with tone guidance when enabled.
+
+    Read at call time (not import time) so tests and the A/B harness can toggle the
+    flag between agent constructions.
+    """
+    if tone_prompt_enabled():
+        return f"{SYSTEM_PROMPT}\n\n{TONE_GUIDANCE}"
+    return SYSTEM_PROMPT
+
+
+def task_editor_prompt() -> str:
+    """The task-editor system prompt, with tone guidance when enabled.
+
+    The editor gets the same treatment as identification on purpose: it rewrites the
+    same user-visible description, so gating only the identify path would make the
+    tone flip back to the old voice the first time a user refined a task.
+    """
+    if tone_prompt_enabled():
+        return f"{TASK_EDITOR_PROMPT}\n\n{TONE_GUIDANCE}"
+    return TASK_EDITOR_PROMPT
+
+
 class TaskIdentifierAgent:
     def __init__(self) -> None:
+        # Prompts are resolved here, so the flag is read once per process at agent
+        # construction. Toggling the env var later has no effect until a new agent
+        # is built (which is what the A/B harness does between variants).
         self.agent = create_agent(
             model=model,
             response_format=ToolStrategy(_TaskExtraction),
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=identify_system_prompt(),
         )
         self.task_editor_agent = create_agent(
             model=model,
             response_format=ToolStrategy(Task),
-            system_prompt=TASK_EDITOR_PROMPT,
+            system_prompt=task_editor_prompt(),
         )
 
     def _agent_config(self, thread_id: str | None = None) -> dict:
