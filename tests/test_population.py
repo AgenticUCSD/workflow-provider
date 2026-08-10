@@ -270,3 +270,46 @@ def test_identify_does_not_populate_when_disabled(monkeypatch):
     assert resp.status_code == 200, resp.text
     assert calls["n"] == 0  # memory-unit not consulted when the flag is off
     assert resp.json()["context_items"][0]["status"] == "missing"
+
+
+def test_populate_ignores_slots_memory_reports_missing(monkeypatch):
+    # memory-unit's relevance floor reports an unresolved slot as status="missing".
+    # Even if a value/confidence rides along (an older unit, or the floor relaxed),
+    # the provider must not pre-fill it -- a fabricated guess is worse than asking.
+    monkeypatch.setattr(
+        population,
+        "resolve_slots",
+        lambda fields, **kw: [
+            {
+                "field": "recipient",
+                "value": "the-nearest-unrelated-snippet",
+                "source": "context",
+                "confidence": 0.93,
+                "status": "missing",
+            }
+        ],
+    )
+    task = _task_with_items([ContextItem(field="recipient", status="missing")])
+
+    out = population.populate_context_items(task, user_id="user-1")
+    ci = out.context_items[0]
+
+    assert ci.status == "missing"
+    assert ci.value is None
+
+
+def test_populate_still_fills_when_status_absent(monkeypatch):
+    # Backward compatibility: a payload without `status` at all is not treated as
+    # unresolved, so older memory-unit builds keep working.
+    monkeypatch.setattr(
+        population,
+        "resolve_slots",
+        lambda fields, **kw: [
+            {"field": "recipient", "value": "alice@example.com", "confidence": 0.8}
+        ],
+    )
+    task = _task_with_items([ContextItem(field="recipient", status="missing")])
+
+    out = population.populate_context_items(task, user_id="user-1")
+    assert out.context_items[0].status == "guessed"
+    assert out.context_items[0].value == "alice@example.com"
