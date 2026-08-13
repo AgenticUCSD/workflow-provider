@@ -66,6 +66,14 @@ def populate_context_items(
             continue
         value = r.get("value")
         confidence = r.get("confidence") or 0.0
+        # Only trust slots memory-unit itself considers resolved. Belt-and-braces
+        # next to memory-unit's own relevance floor: a slot it reports "missing"
+        # must never be pre-filled, whatever value or confidence rides along. Note
+        # `confidence` is a poor gate on its own -- memory-unit derives it from a
+        # BM25 score that scales with corpus size, so the same true hit scores
+        # higher in a larger store.
+        if r.get("status") not in (None, "present"):
+            continue
         if value and confidence >= min_confidence:
             ci.value = value
             ci.source = r.get("source") or "context"
