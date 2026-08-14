@@ -10,6 +10,8 @@ from utils.task import Task, TaskTypes, Workflow
 from agents.task_agent import ContextItem, Metadata, TaskIdentifierAgent
 from agents.intent_agent import IntentClassifierAgent, IntentLabel, intent_router_enabled
 from utils.population import auto_populate_enabled, populate_context_items
+from utils.memory_client import memory_enabled, learn_facts
+from utils.writeback import build_learn_items, writeback_enabled
 from utils.slots import (
     normalize_slots,
     normalize_slot_values,
@@ -88,6 +90,16 @@ class EditTaskResponse(BaseModel):
 class PopulateTaskContextRequest(BaseModel):
     task: Task
     thread_id: Optional[str] = None
+
+
+class LearnTaskContextRequest(BaseModel):
+    task: Task
+    thread_id: Optional[str] = None
+
+
+class LearnTaskContextResponse(BaseModel):
+    learned: int
+    status: Literal["learned", "disabled", "error"]
 
 
 class PopulateWorkflowsRequest(BaseModel):
@@ -419,6 +431,53 @@ def populate_task_context_endpoint(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/learn_task_context", response_model=LearnTaskContextResponse)
+def learn_task_context_endpoint(
+    request: LearnTaskContextRequest,
+    x_user_id: Optional[str] = Header(None),
+    x_thread_id: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Write-back: persist a confirmed task's user/email-sourced parameters to
+    memory-unit so a later task's ``/populate_task_context`` can pre-fill them.
+
+    Additive + flag-gated on **both** ``MEMORY_URL`` and ``MEMORY_WRITEBACK``
+    (default off); when either is unset this short-circuits to
+    ``{"learned": 0, "status": "disabled"}`` with no network call. Only slots
+    whose value came from the email or the user are written back: ``"present"``
+    slots, plus ``"guessed"`` slots the user explicitly overrode
+    (``source == "user"``), which are corrections rather than guesses. Anything
+    memory itself resolved and the user left alone is never re-learned, which
+    would otherwise let a bad guess become a permanent "fact" nothing
+    contradicts (see utils/writeback.py).
+
+    Never raises / never 5xxs on memory-unit trouble: ``learn_facts`` shares
+    ``resolve_slots``'s never-raises contract, so any memory-unit failure just
+    yields ``{"learned": 0, "status": "error"}``.
+    """
+    if not writeback_enabled() or not memory_enabled():
+        return LearnTaskContextResponse(learned=0, status="disabled")
+
+    thread_id = request.thread_id or x_thread_id
+    items = build_learn_items(request.task)
+    if not items:
+        return LearnTaskContextResponse(learned=0, status="learned")
+
+    try:
+        learned = learn_facts(
+            items,
+            user_id=x_user_id,
+            thread_id=thread_id,
+            authorization=authorization,
+        )
+        return LearnTaskContextResponse(learned=learned, status="learned")
+    except Exception:
+        # learn_facts never raises (0 on any problem, same contract as
+        # resolve_slots), but keep the endpoint's own contract airtight in case
+        # that ever changes — memory-unit trouble must never 5xx here.
+        return LearnTaskContextResponse(learned=0, status="error")
 
 
 # identify task and then return candidate workflows
