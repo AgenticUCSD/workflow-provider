@@ -1,4 +1,4 @@
-"""Thin, optional client for the memory-unit ``/resolve`` endpoint.
+"""Thin, optional client for the memory-unit ``/resolve`` and ``/learn`` endpoints.
 
 Flag-gated on the ``MEMORY_URL`` env var: if it is unset, resolution is a no-op
 and the pipeline behaves exactly as before. Uses only the standard library
@@ -76,3 +76,61 @@ def resolve_slots(
         headers["Authorization"] = authorization
 
     return _post_resolve(url, payload, headers, timeout)
+
+
+@traced(name="retrieval.memory.learn")
+def _post_learn(
+    url: str, payload: bytes, headers: Dict[str, str], timeout: float
+) -> int:
+    """Do the actual ``/learn`` POST, traced as a span.
+
+    Mirrors ``_post_resolve``'s never-raises contract: always returns an int
+    (0 on any failure), so the span always completes cleanly regardless of
+    network outcome."""
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+        data = json.loads(body)
+        learned = data.get("learned", 0)
+        return learned if isinstance(learned, int) else 0
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return 0
+
+
+def learn_facts(
+    items: List[Dict[str, Any]],
+    user_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    authorization: Optional[str] = None,
+    timeout: float = 5.0,
+) -> int:
+    """Call memory-unit ``/learn`` with pre-built ``{text, category, task_id, scope}``
+    items (see ``utils/writeback.py``, which owns the sentence format and the
+    provenance filtering — this function is a thin, best-effort transport).
+
+    Returns the number of facts memory-unit reports as newly learned. On any
+    problem returns ``0`` — this function never raises, exactly like
+    ``resolve_slots``, so callers can treat it as best-effort write-back.
+
+    ``authorization`` is the caller's incoming ``Authorization`` header
+    (``"Bearer <token>"``), forwarded verbatim. memory-unit's ``/learn`` requires
+    both a bearer and ``X-User-Id`` unconditionally (it authenticates writes even
+    when ``MEMORY_VALIDATE_TOKEN`` is off), so without them the call 401s;
+    harmless — it still just returns 0.
+    """
+    base_url = os.getenv("MEMORY_URL")
+    if not base_url or not items:
+        return 0
+
+    url = base_url.rstrip("/") + "/learn"
+    payload = json.dumps({"items": items}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if user_id:
+        headers["X-User-Id"] = user_id
+    if thread_id:
+        headers["X-Thread-Id"] = thread_id
+    if authorization:
+        headers["Authorization"] = authorization
+
+    return _post_learn(url, payload, headers, timeout)
