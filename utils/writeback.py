@@ -34,12 +34,48 @@ Two hard constraints (see PIPELINE_REWORK / the write-back task spec):
 """
 
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from utils.task import Task
 
 # The whole email body is not a task parameter; never learn it as one.
 _EXCLUDED_FIELDS = {"body"}
+
+# Only slots that are plausibly durable facts *about the user* are written back.
+# The first cut learned every confirmed parameter, which meant one meeting's
+# time window and Meet link were stored as if they were preferences — a later,
+# unrelated task then pre-filled `time_window` and `meeting_link` from a meeting
+# that had already happened. A stale suggestion is worse than no suggestion: it
+# looks authoritative and the user has to notice it is wrong.
+#
+# Allowlist rather than denylist, deliberately. Getting this wrong in the
+# "learn too much" direction damages trust in every future pre-fill, while
+# getting it wrong in the "learn too little" direction just means no suggestion.
+# Widen it once real usage shows what is actually stable.
+_DURABLE_FIELD_HINTS = (
+    "timezone", "time_zone",
+    "duration", "length",
+    "location", "venue", "room",
+    "recipient", "sender", "cc", "participant", "attendee", "address",
+    "language", "signature", "tone",
+    "preferred", "default", "usual",
+)
+
+# Second guard, on the value rather than the field name: even an allowlisted slot
+# must not carry something that is obviously a single occurrence. An absolute
+# datetime or a URL is a fact about one event, never a standing preference.
+# (These are also the two shapes memory-unit's _extract_value mangles on the way
+# back out — `2026-07-16T14:00:00-07:00` resolves to "2026" because the field
+# name contains "time" and the number branch wins; a URL gets clause-split at its
+# first dot. Not learning them sidesteps that entirely.)
+_EPHEMERAL_VALUE_RE = re.compile(
+    r"""(
+        \d{4}-\d{2}-\d{2}      # ISO date / datetime, incl. ranges
+      | https?://              # any URL
+    )""",
+    re.IGNORECASE | re.VERBOSE,
+)
 
 
 def writeback_enabled() -> bool:
@@ -62,16 +98,32 @@ def writeback_enabled() -> bool:
     )
 
 
+def _is_durable(field: str, value: str) -> bool:
+    """Whether this slot is a standing fact about the user, not about one event.
+
+    Both guards must pass: the field has to look like a preference, and the value
+    must not be obviously single-occurrence. See the constants above for why this
+    is an allowlist.
+    """
+    name = (field or "").strip().lower()
+    if not any(h in name for h in _DURABLE_FIELD_HINTS):
+        return False
+    return not _EPHEMERAL_VALUE_RE.search(value or "")
+
+
 def _sentence_for(field: str, value: str) -> str:
-    """Render "The <field words> is <value>." — the proven format.
+    """Render "<Field words>: <value>".
 
     Underscores become spaces so every token of the slot name is literally
-    present (the coverage floor), and the "<field> is <value>" shape is what
-    memory-unit's ``_extract_value`` parses cleanly (see its docstring: "The
-    recipient is grace@example.com" -> "grace@example.com").
+    present — memory-unit's resolve() enforces a term-coverage floor over exactly
+    those tokens. A colon is used rather than "is" because ``_extract_value``
+    accepts ``is``/``are``/``:``/``=`` equally, and the copula forced a choice of
+    number the field name cannot supply: the first cut emitted "The participants
+    is Anvay Patil, ..." for every plural slot.
     """
     words = field.replace("_", " ").strip()
-    return f"The {words} is {value}."
+    label = words[:1].upper() + words[1:] if words else words
+    return f"{label}: {value}"
 
 
 def _is_learnable(ci) -> bool:
@@ -116,6 +168,8 @@ def build_learn_items(
             continue
         value = (ci.value or "").strip()
         if not value:
+            continue
+        if not _is_durable(ci.field, value):
             continue
         out.append(
             {

@@ -401,3 +401,58 @@ def test_missing_slot_is_not_learned_even_if_user_sourced():
         [ContextItem(field="recipient", status="missing", value=None, source="user")]
     )
     assert writeback.build_learn_items(task) == []
+
+
+# ── durable-only filter (the real-run regression) ─────────────────────
+
+def _present(field, value):
+    return ContextItem(field=field, status="present", value=value, source="user")
+
+
+def test_real_run_learns_only_the_durable_slots():
+    """The exact five slots a real UI approval produced on 2026-08-13.
+
+    The first cut learned all five, so an unrelated standup a week later
+    pre-filled time_window and meeting_link from a meeting that had already
+    happened. Only timezone and duration are facts about the *user*.
+    """
+    task = _task_with_items([
+        _present("participants", "Anvay Patil, Pranav Soma, Saanvi Rao"),
+        _present("duration", "30"),
+        _present("time_window", "2026-07-16T14:00:00-07:00 to 2026-07-16T14:30:00-07:00"),
+        _present("timezone", "America/Los_Angeles"),
+        _present("meeting_link", "https://meet.google.com/xyz-abcd-efg"),
+    ])
+    learned = {i["text"].split(":")[0] for i in writeback.build_learn_items(task)}
+    assert learned == {"Participants", "Duration", "Timezone"}, learned
+
+
+def test_ephemeral_values_are_refused_even_on_an_allowlisted_field():
+    # "duration" is allowlisted, but an ISO datetime is never a standing
+    # preference — the value guard has to override the field guard.
+    task = _task_with_items([_present("duration", "2026-07-16T14:00:00-07:00")])
+    assert writeback.build_learn_items(task) == []
+    task = _task_with_items([_present("location", "https://meet.google.com/abc")])
+    assert writeback.build_learn_items(task) == []
+
+
+def test_unknown_field_is_not_learned():
+    # Allowlist, not denylist: anything unrecognised is skipped by default.
+    task = _task_with_items([_present("invoice_number", "INV-42")])
+    assert writeback.build_learn_items(task) == []
+
+
+def test_plural_field_does_not_produce_broken_grammar():
+    # Was: "The participants is Anvay Patil, ..."
+    task = _task_with_items([_present("participants", "Anvay Patil, Pranav Soma")])
+    text = writeback.build_learn_items(task)[0]["text"]
+    assert " is " not in text
+    assert text == "Participants: Anvay Patil, Pranav Soma"
+
+
+def test_multi_token_field_still_satisfies_the_coverage_floor():
+    # The property that must survive any change to the sentence template.
+    task = _task_with_items([_present("meeting_duration", "45 minutes")])
+    text = writeback.build_learn_items(task)[0]["text"]
+    for tok in _tokenize("meeting duration"):
+        assert tok in _tokenize(text), f"{tok!r} missing from {text!r}"
