@@ -143,6 +143,76 @@ def test_resolve_slots_omits_authorization_when_absent(monkeypatch):
     assert "Authorization" not in seen["headers"]
 
 
+# ── call timeout (MEMORY_TIMEOUT_SECONDS) ──────────────────────
+
+def test_memory_timeout_defaults_to_five(monkeypatch):
+    monkeypatch.delenv("MEMORY_TIMEOUT_SECONDS", raising=False)
+    assert memory_client.memory_timeout() == 5.0
+
+
+def test_memory_timeout_honors_the_env_var(monkeypatch):
+    monkeypatch.setenv("MEMORY_TIMEOUT_SECONDS", "30")
+    assert memory_client.memory_timeout() == 30.0
+
+
+def test_memory_timeout_clamps_out_of_range(monkeypatch):
+    # Clamped, not rejected: reverting an over-large value to the 5s default
+    # would hand the operator LESS time than they asked for.
+    monkeypatch.setenv("MEMORY_TIMEOUT_SECONDS", "600")
+    assert memory_client.memory_timeout() == 60.0
+    monkeypatch.setenv("MEMORY_TIMEOUT_SECONDS", "0.1")
+    assert memory_client.memory_timeout() == 1.0
+
+
+def test_memory_timeout_falls_back_on_garbage(monkeypatch):
+    for bad in ("", "  ", "abc", "30s", "nan"):
+        monkeypatch.setenv("MEMORY_TIMEOUT_SECONDS", bad)
+        assert memory_client.memory_timeout() == 5.0, bad
+
+
+def test_resolve_slots_uses_the_configured_timeout(monkeypatch):
+    """Read per call, not at import: a Cloud Run env flip must take effect on the
+    next request without a redeploy."""
+    seen = {}
+    monkeypatch.setenv("MEMORY_URL", "http://localhost:9")
+    monkeypatch.setattr(
+        memory_client, "_post_resolve",
+        lambda url, payload, headers, timeout: seen.update(timeout=timeout) or [],
+    )
+
+    monkeypatch.delenv("MEMORY_TIMEOUT_SECONDS", raising=False)
+    memory_client.resolve_slots(["recipient"], user_id="u1")
+    assert seen["timeout"] == 5.0
+
+    monkeypatch.setenv("MEMORY_TIMEOUT_SECONDS", "30")
+    memory_client.resolve_slots(["recipient"], user_id="u1")
+    assert seen["timeout"] == 30.0
+
+
+def test_learn_facts_uses_the_configured_timeout(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("MEMORY_URL", "http://localhost:9")
+    monkeypatch.setenv("MEMORY_TIMEOUT_SECONDS", "30")
+    monkeypatch.setattr(
+        memory_client, "_post_learn",
+        lambda url, payload, headers, timeout: seen.update(timeout=timeout) or 0,
+    )
+    memory_client.learn_facts([{"text": "The recipient is a@b.com."}], user_id="u1")
+    assert seen["timeout"] == 30.0
+
+
+def test_explicit_timeout_still_wins(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("MEMORY_URL", "http://localhost:9")
+    monkeypatch.setenv("MEMORY_TIMEOUT_SECONDS", "30")
+    monkeypatch.setattr(
+        memory_client, "_post_resolve",
+        lambda url, payload, headers, timeout: seen.update(timeout=timeout) or [],
+    )
+    memory_client.resolve_slots(["recipient"], user_id="u1", timeout=2.0)
+    assert seen["timeout"] == 2.0
+
+
 def test_populate_forwards_authorization(monkeypatch):
     seen = {}
 

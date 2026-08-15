@@ -8,6 +8,7 @@ planner falls back to its existing behavior (ask the human).
 """
 
 import json
+import logging
 import os
 import urllib.error
 import urllib.request
@@ -15,10 +16,48 @@ from typing import Any, Dict, List, Optional
 
 from utils.tracing import traced
 
+_DEFAULT_TIMEOUT = 5.0
+_MIN_TIMEOUT = 1.0
+_MAX_TIMEOUT = 60.0
+
 
 def memory_enabled() -> bool:
     """True when a memory-unit base URL is configured."""
     return bool(os.getenv("MEMORY_URL"))
+
+
+def memory_timeout() -> float:
+    """Seconds to wait on a memory-unit call before giving up.
+
+    The default of 5s is shorter than a memory-unit **cold start**, measured at
+    20-22s (it hydrates a per-user index on first touch and Cloud Run runs it at
+    min-instances=0). So the first call after an idle period times out, and both
+    callers honour their never-raises contract by returning empty/0 — silently.
+    The user sees "memory forgot", and on the write-back side the approval
+    teaches nothing at all.
+
+    Raising this trades a slow first call for a correct one, which is the right
+    way round: the extension's ``fetchJson`` sets no client-side abort, so the
+    user waits rather than losing the result. Tune with
+    ``MEMORY_TIMEOUT_SECONDS``. Read per call, so a Cloud Run env flip takes
+    effect on the next request without a redeploy.
+
+    Unparseable values fall back to the default; out-of-range values are
+    **clamped** rather than rejected (same shape as memory-unit's
+    ``resolve_min_coverage``). Clamping matters here: reverting an over-large
+    value to the 5s default would silently give the operator *less* time than
+    they asked for, which is the exact failure this function exists to fix.
+    """
+    raw = os.getenv("MEMORY_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return _DEFAULT_TIMEOUT
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_TIMEOUT
+    if value != value:  # NaN — float("nan") parses, so screen it explicitly
+        return _DEFAULT_TIMEOUT
+    return max(_MIN_TIMEOUT, min(_MAX_TIMEOUT, value))
 
 
 @traced(name="retrieval.memory.resolve")
@@ -36,7 +75,14 @@ def _post_resolve(
         data = json.loads(body)
         slots = data.get("slots", [])
         return slots if isinstance(slots, list) else []
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        # Degrade silently to the caller, but not to the operator: an empty list
+        # is indistinguishable from "memory knew nothing", which is how a timeout
+        # against a cold memory-unit stayed invisible for so long.
+        logging.getLogger(__name__).warning(
+            "memory-unit /resolve failed after %.1fs; degrading to no slots: %s: %s",
+            timeout, type(exc).__name__, exc,
+        )
         return []
 
 
@@ -46,7 +92,7 @@ def resolve_slots(
     thread_id: Optional[str] = None,
     scope: Optional[List[str]] = None,
     authorization: Optional[str] = None,
-    timeout: float = 5.0,
+    timeout: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Call memory-unit ``/resolve`` for the given slot names.
 
@@ -58,10 +104,16 @@ def resolve_slots(
     (``"Bearer <token>"``), forwarded verbatim. memory-unit verifies it on
     ``/resolve`` when ``MEMORY_VALIDATE_TOKEN`` is on, so without it that call
     401s; harmless when memory-unit runs with validation off.
+
+    ``timeout`` defaults to ``memory_timeout()`` (``MEMORY_TIMEOUT_SECONDS``,
+    else 5s) — resolved here rather than in the signature so the env var is read
+    per call, not once at import.
     """
     base_url = os.getenv("MEMORY_URL")
     if not base_url or not fields:
         return []
+    if timeout is None:
+        timeout = memory_timeout()
 
     url = base_url.rstrip("/") + "/resolve"
     payload = json.dumps({"fields": fields, "scope": scope}).encode("utf-8")
@@ -94,7 +146,15 @@ def _post_learn(
         data = json.loads(body)
         learned = data.get("learned", 0)
         return learned if isinstance(learned, int) else 0
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        # Same reasoning as _post_resolve, and it matters more here: 0 is also
+        # what a successful "nothing new to learn" returns, so without this line
+        # a write-back that never happened looks exactly like one that had
+        # nothing to do.
+        logging.getLogger(__name__).warning(
+            "memory-unit /learn failed after %.1fs; nothing was learned: %s: %s",
+            timeout, type(exc).__name__, exc,
+        )
         return 0
 
 
@@ -103,7 +163,7 @@ def learn_facts(
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     authorization: Optional[str] = None,
-    timeout: float = 5.0,
+    timeout: Optional[float] = None,
 ) -> int:
     """Call memory-unit ``/learn`` with pre-built ``{text, category, task_id, scope}``
     items (see ``utils/writeback.py``, which owns the sentence format and the
@@ -118,10 +178,17 @@ def learn_facts(
     both a bearer and ``X-User-Id`` unconditionally (it authenticates writes even
     when ``MEMORY_VALIDATE_TOKEN`` is off), so without them the call 401s;
     harmless — it still just returns 0.
+
+    ``timeout`` defaults to ``memory_timeout()``, exactly as in
+    ``resolve_slots``. Write-back is the more damaging side of a timeout: a
+    dropped ``/resolve`` costs one pre-fill, a dropped ``/learn`` costs the fact
+    permanently, because nothing retries it.
     """
     base_url = os.getenv("MEMORY_URL")
     if not base_url or not items:
         return 0
+    if timeout is None:
+        timeout = memory_timeout()
 
     url = base_url.rstrip("/") + "/learn"
     payload = json.dumps({"items": items}).encode("utf-8")
