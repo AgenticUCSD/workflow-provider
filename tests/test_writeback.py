@@ -121,6 +121,51 @@ def test_mixed_statuses_only_present_written():
     assert "a@b.com" in items[0]["text"]
 
 
+# ── the allowlist matches word starts, not substrings ──────────────────────
+#
+# Plain `hint in name` quietly widened the allowlist far past what it lists,
+# because two hints are short and common: "cc" is inside "occasion",
+# "success_criteria" and "accuracy_target"; "tone" is inside "milestone". Each of
+# those is exactly the single-event value this filter exists to keep out of the
+# user's permanent memory, and the value guard does not catch them (it only
+# rejects ISO dates and URLs).
+
+@pytest.mark.parametrize(
+    "field",
+    ["occasion", "milestone", "success_criteria", "accuracy_target", "topic"],
+)
+def test_substring_lookalike_fields_are_not_durable(field):
+    task = _task_with_items(
+        [ContextItem(field=field, status="present", value="Q3 planning offsite")]
+    )
+    assert writeback.build_learn_items(task) == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        # Plural slots must keep matching singular hints -- "participants" is one
+        # of the facts already learned in production, so whole-word equality
+        # would have been a regression, not a fix.
+        ("participants", "Anvay, Sam"),
+        ("attendees", "Anvay, Sam"),
+        ("meeting_duration", "30"),
+        # Spelling variants of the same hint.
+        ("timezone", "America/Los_Angeles"),
+        ("time_zone", "America/Los_Angeles"),
+        # A hint that is itself a whole short field.
+        ("cc", "a@b.com"),
+        ("preferred_location", "SF"),
+        ("signature_block", "Best, A"),
+    ],
+)
+def test_real_durable_fields_still_match(field, value):
+    task = _task_with_items([ContextItem(field=field, status="present", value=value)])
+    items = writeback.build_learn_items(task)
+    assert len(items) == 1, f"{field} stopped being durable"
+    assert value in items[0]["text"]
+
+
 # ── round-trip: generated text satisfies memory-unit's coverage rule ────────
 
 @pytest.mark.parametrize(

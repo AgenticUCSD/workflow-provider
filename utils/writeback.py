@@ -62,6 +62,10 @@ _DURABLE_FIELD_HINTS = (
     "preferred", "default", "usual",
 )
 
+# Field names split into words, so a hint can be matched against word starts
+# rather than anywhere in the string. See _matches_durable_hint.
+_FIELD_WORD_RE = re.compile(r"[a-z0-9]+")
+
 # Second guard, on the value rather than the field name: even an allowlisted slot
 # must not carry something that is obviously a single occurrence. An absolute
 # datetime or a URL is a fact about one event, never a standing preference.
@@ -98,6 +102,32 @@ def writeback_enabled() -> bool:
     )
 
 
+def _matches_durable_hint(name: str) -> bool:
+    """Whether a slot name matches the allowlist.
+
+    A hint matches when it starts a **word** of the field name, not when it
+    appears anywhere in it. Plain substring matching quietly widened the
+    allowlist well past what it lists, because two of the hints are short and
+    common: "cc" is inside "occasion", "success_criteria" and "accuracy_target",
+    and "tone" is inside "milestone". Every one of those is exactly the
+    event-specific value this filter exists to keep out of the user's permanent
+    memory.
+
+    Prefix-of-a-word rather than whole-word equality, because the allowlist is
+    written in the singular and real slots arrive plural: "participant" has to go
+    on matching "participants", which is one of the facts already learned in
+    production. The squashed form covers hyphen/underscore spelling variants, so
+    the "time_zone" hint still matches a "timezone" field and vice versa.
+    """
+    words = _FIELD_WORD_RE.findall(name)
+    squashed = "".join(words)
+    for hint in _DURABLE_FIELD_HINTS:
+        h = hint.replace("_", "")
+        if any(w.startswith(h) for w in words) or squashed.startswith(h):
+            return True
+    return False
+
+
 def _is_durable(field: str, value: str) -> bool:
     """Whether this slot is a standing fact about the user, not about one event.
 
@@ -106,7 +136,7 @@ def _is_durable(field: str, value: str) -> bool:
     is an allowlist.
     """
     name = (field or "").strip().lower()
-    if not any(h in name for h in _DURABLE_FIELD_HINTS):
+    if not _matches_durable_hint(name):
         return False
     return not _EPHEMERAL_VALUE_RE.search(value or "")
 
