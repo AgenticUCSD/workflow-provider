@@ -212,3 +212,155 @@ def test_promote_endpoint_transport_error(monkeypatch):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "error"
+
+
+# ── /create_template auto-promote (ARTIFACT_AUTO_PROMOTE) ──────
+
+def _patched_create(monkeypatch, workflow=None):
+    """Patch the builder + template store so /create_template needs no LLM/network."""
+    from utils.task import Objective, Status, Task, TaskTypes, Workflow
+
+    wf = workflow or Workflow(
+        workflow_id="w1", name="Sched", description="d", steps=["Find time"]
+    )
+    task = Task(
+        task_id="task_t1",
+        task_type=TaskTypes.EXECUTE,
+        objective=Objective(
+            objective_id="obj_1",
+            name="test",
+            description="test objective",
+            inputs={},
+            success_criteria="done",
+            expected_output={"status": "completed"},
+        ),
+        status=Status.PENDING,
+    )
+    monkeypatch.setattr(
+        app_module.builder_agent, "create_workflow_initial", lambda *a, **k: wf
+    )
+    monkeypatch.setattr(app_module.template_store, "add_template", lambda t: "doc1")
+    return task
+
+
+def test_create_template_default_off_never_promotes(monkeypatch):
+    monkeypatch.setenv("EXECUTOR_ARTIFACTS_URL", "http://localhost:9")
+    monkeypatch.delenv("ARTIFACT_AUTO_PROMOTE", raising=False)
+    task = _patched_create(monkeypatch)
+    called = {"n": 0}
+    monkeypatch.setattr(
+        app_module, "post_template",
+        lambda *a, **k: called.__setitem__("n", called["n"] + 1),
+    )
+    client = TestClient(app_module.app)
+    resp = client.post(
+        "/create_template",
+        json={"task": task.model_dump(mode="json")},
+        headers={"X-User-Id": "u", "Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert called["n"] == 0
+
+
+def test_create_template_auto_promote_called_once_with_headers(monkeypatch):
+    monkeypatch.setenv("EXECUTOR_ARTIFACTS_URL", "http://localhost:9")
+    monkeypatch.setenv("ARTIFACT_AUTO_PROMOTE", "true")
+    task = _patched_create(monkeypatch)
+    captured = {}
+
+    def fake_post(template, **kw):
+        captured["template"] = template
+        captured.update(kw)
+        return {"artifact_id": "exec-uuid"}
+
+    monkeypatch.setattr(app_module, "post_template", fake_post)
+    client = TestClient(app_module.app)
+    resp = client.post(
+        "/create_template",
+        json={"task": task.model_dump(mode="json"), "thread_id": "th-1"},
+        headers={"X-User-Id": "sub-1", "Authorization": "Bearer ya29.x"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert captured["template"].name == "Sched"
+    assert captured["x_user_id"] == "sub-1"
+    assert captured["authorization"] == "Bearer ya29.x"
+    assert captured["user_id"] == "*"
+    assert captured["source_trace_ids"] == ["th-1"]
+    assert captured["thread_id"] == "th-1"
+
+
+def test_create_template_auto_promote_skipped_without_headers(monkeypatch):
+    monkeypatch.setenv("EXECUTOR_ARTIFACTS_URL", "http://localhost:9")
+    monkeypatch.setenv("ARTIFACT_AUTO_PROMOTE", "true")
+    task = _patched_create(monkeypatch)
+    called = {"n": 0}
+    monkeypatch.setattr(
+        app_module, "post_template",
+        lambda *a, **k: called.__setitem__("n", called["n"] + 1),
+    )
+    client = TestClient(app_module.app)
+    resp = client.post("/create_template", json={"task": task.model_dump(mode="json")})
+    assert resp.status_code == 200, resp.text
+    assert called["n"] == 0
+
+
+def test_create_template_auto_promote_none_return_still_200(monkeypatch):
+    monkeypatch.setenv("EXECUTOR_ARTIFACTS_URL", "http://localhost:9")
+    monkeypatch.setenv("ARTIFACT_AUTO_PROMOTE", "true")
+    task = _patched_create(monkeypatch)
+    monkeypatch.setattr(app_module, "post_template", lambda *a, **k: None)
+    client = TestClient(app_module.app)
+    resp = client.post(
+        "/create_template",
+        json={"task": task.model_dump(mode="json")},
+        headers={"X-User-Id": "u", "Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "Sched"
+
+
+def test_create_template_auto_promote_raises_still_200(monkeypatch):
+    monkeypatch.setenv("EXECUTOR_ARTIFACTS_URL", "http://localhost:9")
+    monkeypatch.setenv("ARTIFACT_AUTO_PROMOTE", "true")
+    task = _patched_create(monkeypatch)
+
+    def boom(*a, **k):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(app_module, "post_template", boom)
+    client = TestClient(app_module.app)
+    resp = client.post(
+        "/create_template",
+        json={"task": task.model_dump(mode="json")},
+        headers={"X-User-Id": "u", "Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "Sched"
+
+
+def test_create_template_threshold_reuse_never_promotes(monkeypatch):
+    monkeypatch.setenv("EXECUTOR_ARTIFACTS_URL", "http://localhost:9")
+    monkeypatch.setenv("ARTIFACT_AUTO_PROMOTE", "true")
+    task = _patched_create(monkeypatch)
+    existing = _template(template_id="reused")
+    match = {"template": existing, "distance": 0.1, "score": 0.9}
+    monkeypatch.setattr(
+        app_module.template_store, "search_templates", lambda *a, **k: [match]
+    )
+    called = {"n": 0}
+    monkeypatch.setattr(
+        app_module, "post_template",
+        lambda *a, **k: called.__setitem__("n", called["n"] + 1),
+    )
+    client = TestClient(app_module.app)
+    resp = client.post(
+        "/create_template",
+        json={
+            "task": task.model_dump(mode="json"),
+            "max_distance": 0.5,
+        },
+        headers={"X-User-Id": "u", "Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["template_id"] == "reused"
+    assert called["n"] == 0
