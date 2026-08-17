@@ -501,3 +501,121 @@ def test_multi_token_field_still_satisfies_the_coverage_floor():
     text = writeback.build_learn_items(task)[0]["text"]
     for tok in _tokenize("meeting duration"):
         assert tok in _tokenize(text), f"{tok!r} missing from {text!r}"
+
+
+# ── `submitted`: making `learned: 0` interpretable ───────────────
+#
+# `learned: 0` has three causes that need opposite responses -- nothing was
+# eligible, everything was already known, or the write failed. `status` separates
+# only the last one, which leaves the first two looking identical.
+#
+# This is not hypothetical. Verifying the durable-hints fix against production
+# nearly passed for the wrong reason: every field came back `learned: 0`, which
+# read as "the filter is correctly refusing collisions", when the positive control
+# was being deduped too and the test was in fact measuring nothing at all. A
+# `submitted` count would have shown 1-vs-0 immediately.
+
+
+def _endpoint_on(monkeypatch, learn_returns=1):
+    """Flags on, learn_facts stubbed. Returns the recorded call count."""
+    monkeypatch.setenv("MEMORY_WRITEBACK", "true")
+    monkeypatch.setenv("MEMORY_URL", "http://localhost:9")
+    calls = {"n": 0, "items": None}
+
+    def fake(items, *a, **kw):
+        calls["n"] += 1
+        calls["items"] = items
+        return learn_returns
+
+    monkeypatch.setattr(app_module, "learn_facts", fake)
+    return calls
+
+
+def _post(task):
+    client = TestClient(app_module.app)
+    return client.post(
+        "/learn_task_context",
+        json={"task": task.model_dump(mode="json")},
+        headers={"X-User-Id": "user-1"},
+    )
+
+
+def test_submitted_is_zero_when_nothing_was_eligible(monkeypatch):
+    # `occasion` is not durable, so build_learn_items declines it.
+    calls = _endpoint_on(monkeypatch)
+    resp = _post(_task_present(field="occasion", value="Diwali"))
+    body = resp.json()
+    assert body["status"] == "learned"
+    assert body["learned"] == 0
+    assert body["submitted"] == 0        # <- nothing was even offered
+    assert calls["n"] == 0               # and memory-unit was never called
+
+
+def test_submitted_is_nonzero_when_everything_was_deduped(monkeypatch):
+    # The exact case that nearly produced a false pass: an eligible slot was sent,
+    # memory-unit already had it, so learned=0 -- but this is a SUCCESS.
+    calls = _endpoint_on(monkeypatch, learn_returns=0)
+    resp = _post(_task_present(field="timezone", value="America/Los_Angeles"))
+    body = resp.json()
+    assert body["status"] == "learned"
+    assert body["learned"] == 0
+    assert body["submitted"] == 1        # <- the discriminator
+    assert calls["n"] == 1
+
+
+def test_the_two_zero_learned_cases_are_distinguishable(monkeypatch):
+    # The whole point, stated as one property: same `learned` and same `status`,
+    # different `submitted`. Without the field these two are byte-identical.
+    calls = _endpoint_on(monkeypatch, learn_returns=0)
+    refused = _post(_task_present(field="occasion", value="Diwali")).json()
+    deduped = _post(_task_present(field="timezone", value="America/Los_Angeles")).json()
+
+    assert refused["learned"] == deduped["learned"] == 0
+    assert refused["status"] == deduped["status"] == "learned"
+    assert refused["submitted"] != deduped["submitted"]
+    assert (refused["submitted"], deduped["submitted"]) == (0, 1)
+
+
+def test_submitted_counts_what_was_sent_on_success(monkeypatch):
+    calls = _endpoint_on(monkeypatch, learn_returns=2)
+    task = _task_with_items([
+        ContextItem(field="timezone", status="present", value="America/Los_Angeles"),
+        ContextItem(field="recipient", status="present", value="dana@example.com"),
+    ])
+    body = _post(task).json()
+    assert body["learned"] == 2
+    assert body["submitted"] == 2
+    assert len(calls["items"]) == 2
+
+
+def test_submitted_reports_the_attempt_when_the_write_fails(monkeypatch):
+    # The items WERE eligible; the write is what broke. submitted must not read 0,
+    # or an outage looks like "nothing to learn".
+    monkeypatch.setenv("MEMORY_WRITEBACK", "true")
+    monkeypatch.setenv("MEMORY_URL", "http://localhost:9")
+
+    def boom(*a, **kw):
+        raise RuntimeError("memory-unit down")
+
+    monkeypatch.setattr(app_module, "learn_facts", boom)
+    body = _post(_task_present(field="timezone", value="America/Los_Angeles")).json()
+    assert body["status"] == "error"
+    assert body["learned"] == 0
+    assert body["submitted"] == 1
+
+
+def test_submitted_is_zero_when_flags_are_off(monkeypatch):
+    monkeypatch.delenv("MEMORY_WRITEBACK", raising=False)
+    monkeypatch.setenv("MEMORY_URL", "http://localhost:9")
+    body = _post(_task_present()).json()
+    assert body["status"] == "disabled"
+    assert body["submitted"] == 0
+
+
+def test_existing_response_fields_are_unchanged(monkeypatch):
+    # Additive only: nothing that already read `learned`/`status` may shift.
+    _endpoint_on(monkeypatch, learn_returns=1)
+    body = _post(_task_present(field="timezone", value="America/Los_Angeles")).json()
+    assert body["learned"] == 1
+    assert body["status"] == "learned"
+    assert set(body) == {"learned", "status", "submitted"}
