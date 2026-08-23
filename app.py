@@ -101,6 +101,25 @@ class LearnTaskContextRequest(BaseModel):
 class LearnTaskContextResponse(BaseModel):
     learned: int
     status: Literal["learned", "disabled", "error"]
+    # How many items were actually handed to memory-unit.
+    #
+    # Without this, ``learned: 0`` is ambiguous across three outcomes that call for
+    # completely different responses:
+    #   - nothing qualified   -> submitted=0, status="learned"  (write-back declined
+    #     every slot: not durable, not learnable, or empty. Working as designed.)
+    #   - all already known   -> submitted>0, status="learned"  (memory-unit deduped
+    #     them; the facts ARE stored. Also fine.)
+    #   - memory-unit refused -> submitted>0, status="error"    (the only bad one.)
+    # ``status`` alone cannot separate the first two, and they are the pair most
+    # easily confused for a bug. Added because a live verification of the
+    # durable-hints fix nearly passed for the wrong reason: every field returned
+    # ``learned: 0``, which looked like the filter correctly refusing collisions,
+    # when in fact the positive control was being deduped too and the test was
+    # measuring nothing.
+    #
+    # Additive and defaulted: existing callers (the extension reads only
+    # ``learned``) are unaffected.
+    submitted: int = 0
 
 
 class PopulateWorkflowsRequest(BaseModel):
@@ -571,14 +590,29 @@ def learn_task_context_endpoint(
     Never raises / never 5xxs on memory-unit trouble: ``learn_facts`` shares
     ``resolve_slots``'s never-raises contract, so any memory-unit failure just
     yields ``{"learned": 0, "status": "error"}``.
+
+    Read ``submitted`` alongside ``learned`` — ``learned`` alone cannot be
+    interpreted:
+
+    ==========================  =========  ======  ==================================
+    outcome                     submitted  status  meaning
+    ==========================  =========  ======  ==================================
+    flags off                   0          disabled  no call was made
+    nothing eligible            0          learned   every slot declined (by design)
+    sent, all already known     >0         learned   deduped by memory-unit; stored
+    sent, some new              >0         learned   ``learned`` is the new count
+    sent, memory-unit failed    >0         error     the only outcome to act on
+    ==========================  =========  ======  ==================================
     """
     if not writeback_enabled() or not memory_enabled():
-        return LearnTaskContextResponse(learned=0, status="disabled")
+        return LearnTaskContextResponse(learned=0, status="disabled", submitted=0)
 
     thread_id = request.thread_id or x_thread_id
     items = build_learn_items(request.task)
     if not items:
-        return LearnTaskContextResponse(learned=0, status="learned")
+        # Nothing the task carried was eligible. Distinguished from "sent and
+        # deduped" by submitted=0 — see LearnTaskContextResponse.
+        return LearnTaskContextResponse(learned=0, status="learned", submitted=0)
 
     try:
         learned = learn_facts(
@@ -587,12 +621,18 @@ def learn_task_context_endpoint(
             thread_id=thread_id,
             authorization=authorization,
         )
-        return LearnTaskContextResponse(learned=learned, status="learned")
+        return LearnTaskContextResponse(
+            learned=learned, status="learned", submitted=len(items)
+        )
     except Exception:
         # learn_facts never raises (0 on any problem, same contract as
         # resolve_slots), but keep the endpoint's own contract airtight in case
         # that ever changes — memory-unit trouble must never 5xx here.
-        return LearnTaskContextResponse(learned=0, status="error")
+        # submitted stays at what we tried to send: the items were eligible, the
+        # write is what failed, and that difference is the whole point of the field.
+        return LearnTaskContextResponse(
+            learned=0, status="error", submitted=len(items)
+        )
 
 
 # identify task and then return candidate workflows
